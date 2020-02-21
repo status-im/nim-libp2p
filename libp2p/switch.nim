@@ -18,6 +18,7 @@ import connection,
        peerinfo,
        protocols/identify,
        protocols/pubsub/pubsub,
+       protocols/kademlia/kademlia,
        muxers/muxer,
        peer
 
@@ -45,6 +46,7 @@ type
       streamHandler*: StreamHandler
       secureManagers*: Table[string, Secure]
       pubSub*: Option[PubSub]
+      kadProto*: Option[KadProto]
 
 proc newNoPubSubException(): ref Exception {.inline.} =
   result = newException(NoPubSubException, "no pubsub provided!")
@@ -318,6 +320,44 @@ proc publish*(s: Switch, topic: string, data: seq[byte]): Future[void] {.gcsafe.
 
   result = s.pubSub.get().publish(topic, data)
 
+proc ping*(s: Switch, peerInfo: PeerInfo) {.async, gcsafe.} =
+  ## Ping a peer for Kademlia
+  if s.kadProto.isSome:
+    # XXX: Consider using connection instead of PeerInfo
+    #let conn = await s.dial(peerInfo, s.pubSub.get().codec)
+    #await s.pubSub.get().subscribeToPeer(conn)
+    result = s.kadProto.get().ping(peerInfo)
+
+# XXX: Probably abstract this to have RPC as argument, not name
+proc listenForPing*(s: Switch, handler: PingHandler): Future[void] {.gcsafe.} =
+  # listen for pings
+  # TODO: exception handling
+  result = s.kadProto.get().listenForPing(handler)
+
+# XXX: Probably abstract this to have RPC as argument, not name
+# Yikes
+proc listenForFindNode*(s: Switch, handler: FindNodeHandler): Future[void] {.gcsafe.} =
+  # listen for find node reqs
+  # TODO: exception handling
+  result = s.kadProto.get().listenForFindNode(handler)
+
+
+# XXX: Not sure if needed as separate proc
+proc listenToPeer*(s: Switch, peerInfo: PeerInfo) {.async, gcsafe.} =
+  ## Subscribe to Kad peer
+  if s.kadProto.isSome:
+    let conn = await s.dial(peerInfo, s.kadProto.get().codec)
+    await s.kadProto.get().listenToPeer(conn)
+
+# XXX: Why do we need this stuff here?
+proc addContact*(s:Switch, peerInfo: PeerInfo) {.async, gcsafe.} =
+  if s.kadProto.isSome:
+    s.kadProto.get().addContact(peerInfo)
+
+proc iterativeFindNode*(s: Switch, id: PeerId) {.async, gcsafe.} =
+  if s.kadProto.isSome:
+    await s.kadProto.get().iterativeFindNode(id)
+
 proc addValidator*(s: Switch,
                    topics: varargs[string],
                    hook: ValidatorHandler) =
@@ -341,7 +381,8 @@ proc newSwitch*(peerInfo: PeerInfo,
                 identity: Identify,
                 muxers: Table[string, MuxerProvider],
                 secureManagers: Table[string, Secure] = initTable[string, Secure](),
-                pubSub: Option[PubSub] = none(PubSub)): Switch =
+                pubSub: Option[PubSub] = none(PubSub),
+                kadProto: Option[KadProto] = none(KadProto)): Switch =
   new result
   result.peerInfo = peerInfo
   result.ms = newMultistream()
@@ -378,3 +419,7 @@ proc newSwitch*(peerInfo: PeerInfo,
   if pubSub.isSome:
     result.pubSub = pubSub
     result.mount(pubSub.get())
+
+  if kadProto.isSome:
+    result.kadProto = kadProto
+    result.mount(kadProto.get())
