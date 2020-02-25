@@ -9,7 +9,7 @@
 
 import chronos, chronicles
 import tables, options, sets, sequtils
-import rpc/[messages, message], timedcache
+import rpc/[messages, message], ../utils/timedcache
 
 type
   CacheEntry* = object

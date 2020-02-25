@@ -10,7 +10,7 @@
 import options, hashes, strutils, tables, hashes
 import chronos, chronicles
 import rpc/[messages, message, protobuf],
-       timedcache,
+       ../utils/timedcache,
        ../../peer,
        ../../peerinfo,
        ../../connection,

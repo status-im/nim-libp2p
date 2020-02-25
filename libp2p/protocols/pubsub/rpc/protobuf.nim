@@ -195,13 +195,12 @@ proc decodeMessages*(pb: var ProtoBuffer): seq[Message] {.gcsafe.} =
       break
     trace "read message field", seqno = msg.seqno
 
-    var topic: string
     while true:
+      var topic: string
       if pb.getString(4, topic) < 0:
         break
       msg.topicIDs.add(topic)
       trace "read message field", topicName = topic
-      topic = ""
 
     discard pb.getBytes(5, msg.signature)
     trace "read message field", signature = msg.signature

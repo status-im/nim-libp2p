@@ -11,7 +11,7 @@ import sequtils, tables, options, sets, strutils
 import chronos, chronicles
 import pubsub,
        pubsubpeer,
-       timedcache,
+       ../utils/timedcache,
        rpc/[messages, message],
        ../../crypto/crypto,
        ../../connection,

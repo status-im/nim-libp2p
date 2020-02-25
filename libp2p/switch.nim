@@ -46,6 +46,7 @@ type
       secureManagers*: Table[string, Secure]
       pubSub*: Option[PubSub]
       dialedPubSubPeers: HashSet[string]
+      onStarted*: AsyncEvent
 
 proc newNoPubSubException(): ref Exception {.inline.} =
   result = newException(NoPubSubException, "no pubsub provided!")
@@ -279,7 +280,7 @@ proc start*(s: Switch): Future[seq[Future[void]]] {.async, gcsafe.} =
         await conn.close()
 
       await s.cleanupConn(conn)
-        
+
   var startFuts: seq[Future[void]]
   for t in s.transports: # for each transport
     for i, a in s.peerInfo.addrs:
@@ -292,6 +293,7 @@ proc start*(s: Switch): Future[seq[Future[void]]] {.async, gcsafe.} =
     await s.pubSub.get().start()
 
   result = startFuts # listen for incoming connections
+  s.onStarted.fire()
 
 proc stop*(s: Switch) {.async.} =
   trace "stopping switch"
@@ -368,6 +370,7 @@ proc newSwitch*(peerInfo: PeerInfo,
   result.muxers = muxers
   result.secureManagers = initTable[string, Secure]()
   result.dialedPubSubPeers = initHashSet[string]()
+  result.onStarted = newAsyncEvent()
 
   let s = result # can't capture result
   result.streamHandler = proc(stream: Connection) {.async, gcsafe.} =

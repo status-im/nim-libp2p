@@ -7,7 +7,7 @@
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
 
-import tables
+import tables, sequtils
 import chronos, chronicles
 
 logScope:
@@ -18,12 +18,12 @@ const Timeout* = 10.seconds # default timeout in ms
 type
   ExpireHandler*[V] = proc(key: string, val: V) {.gcsafe.}
   TimedEntry*[V] = object of RootObj
-    val: V
-    handler: ExpireHandler[V]
+    val*: V
+    handler*: ExpireHandler[V]
 
   TimedCache*[V] = ref object of RootObj
-    cache*: Table[string, TimedEntry[V]]
-    onExpire*: ExpireHandler[V]
+    cache: Table[string, TimedEntry[V]]
+    onExpire: ExpireHandler[V]
     timeout*: Duration
 
 # TODO: This belong in chronos, temporary left here until chronos is updated
@@ -73,7 +73,9 @@ proc `[]`*[V](t: TimedCache[V], key: string): V =
 proc `[]=`*[V](t: TimedCache[V], key: string, val: V): V =
   t.put(key, val)
 
+proc entries*[V](t: TimedCache[V]): seq[TimedEntry[V]] =
+  toSeq(t.cache.values)
+
 proc newTimedCache*[V](timeout: Duration = Timeout): TimedCache[V] =
-  new result
-  result.cache = initTable[string, TimedEntry[V]]()
-  result.timeout = timeout
+  TimedCache[V](cache: initTable[string, TimedEntry[V]](),
+             timeout: timeout)
