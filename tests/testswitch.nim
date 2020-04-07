@@ -2,23 +2,7 @@ import unittest, tables
 import chronos
 import chronicles
 import nimcrypto/sysrand
-import ../libp2p/[switch,
-                  multistream,
-                  protocols/identify,
-                  connection,
-                  transports/transport,
-                  transports/tcptransport,
-                  multiaddress,
-                  peerinfo,
-                  crypto/crypto,
-                  peer,
-                  protocols/protocol,
-                  muxers/muxer,
-                  muxers/mplex/mplex,
-                  muxers/mplex/types,
-                  protocols/secure/secio,
-                  protocols/secure/secure,
-                  stream/lpstream]
+import ../libp2p/libp2p
 
 when defined(nimHasUsed): {.used.}
 

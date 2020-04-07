@@ -1,13 +1,17 @@
-import
-  options, tables,
-  switch, peer, peerinfo, connection, multiaddress,
-  crypto/crypto, transports/[transport, tcptransport],
-  muxers/[muxer, mplex/mplex, mplex/types],
-  protocols/[identify, secure/secure, secure/secio],
-  protocols/pubsub/[pubsub, gossipsub, floodsub]
+## Nim-LibP2P
+## Copyright (c) 2020 Status Research & Development GmbH
+## Licensed under either of
+##  * Apache License, version 2.0, ([LICENSE-APACHE](LICENSE-APACHE))
+##  * MIT license ([LICENSE-MIT](LICENSE-MIT))
+## at your option.
+## This file may not be copied, modified, or distributed except according to
+## those terms.
 
-export
-  switch, peer, peerinfo, connection, multiaddress, crypto
+import
+  options, tables
+import libp2p
+
+export libp2p
 
 proc newStandardSwitch*(privKey = none(PrivateKey),
                         address = MultiAddress.init("/ip4/127.0.0.1/tcp/0"),
@@ -33,4 +37,3 @@ proc newStandardSwitch*(privKey = none(PrivateKey),
                      muxers,
                      secureManagers = secureManagers,
                      pubSub = some(pubSub))
-

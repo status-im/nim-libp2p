@@ -24,6 +24,7 @@ import ../muxer,
 logScope:
   topic = "Mplex"
 
+const MplexCodec* = "/mplex/6.7.0"
 const DefaultRWTimeout = InfiniteDuration
 
 type

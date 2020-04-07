@@ -8,10 +8,11 @@
 ## those terms.
 
 import
+  libp2p/libp2p,
   libp2p/daemon/[daemonapi, transpool],
   libp2p/protobuf/minprotobuf,
   libp2p/varint
 
 export
-  daemonapi, transpool, minprotobuf, varint
+  libp2p, daemonapi, transpool, minprotobuf, varint
 
