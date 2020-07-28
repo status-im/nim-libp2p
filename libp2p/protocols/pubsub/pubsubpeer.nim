@@ -8,14 +8,13 @@
 ## those terms.
 
 import std/[hashes, options, sequtils, strutils, tables]
-import chronos, chronicles, nimcrypto/sha2, metrics
-import rpc/[messages, message, protobuf],
+import chronos, chronicles, nimcrypto/sha2, metrics, protobuf_serialization
+import rpc/[messages, message],
        timedcache,
        ../../peerid,
        ../../peerinfo,
        ../../stream/connection,
        ../../crypto/crypto,
-       ../../protobuf/minprotobuf,
        ../../utility
 
 logScope:
@@ -91,12 +90,12 @@ proc handle*(p: PubSubPeer, conn: Connection) {.async.} =
           trace "message already received, skipping"
           continue
 
-        var rmsg = decodeRpcMsg(data)
-        if rmsg.isErr():
+        var msg: RPCMsg
+        try:
+          msg = Protobuf.decode(data, RPCMsg)
+        except ProtobufReadError:
           notice "failed to decode msg from peer"
           break
-
-        var msg = rmsg.get()
 
         trace "decoded msg from peer", msg = msg.shortLog
         # trigger hooks
@@ -130,7 +129,7 @@ proc send*(p: PubSubPeer, msg: RPCMsg) {.async.} =
   var mm = msg # hooks can modify the message
   p.sendObservers(mm)
 
-  let encoded = encodeRpcMsg(mm)
+  let encoded = Protobuf.encode(mm)
   if encoded.len <= 0:
     trace "empty message, skipping"
     return

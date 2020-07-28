@@ -9,9 +9,9 @@
 
 ## This module implementes API for `go-libp2p-daemon`.
 import os, osproc, strutils, tables, strtabs
-import chronos
+import chronos, protobuf_serialization
 import ../varint, ../multiaddress, ../multicodec, ../cid, ../peerid
-import ../wire, ../multihash, ../protobuf/minprotobuf
+import ../wire, ../multihash
 import ../crypto/crypto
 
 export peerid, multiaddress, multicodec, multihash, cid, crypto, wire
@@ -20,6 +20,7 @@ when not defined(windows):
   import posix
 
 const
+  MaxMessageSize = 1'u shl 22
   DefaultSocketPath* = "/unix/tmp/p2pd.sock"
   DefaultUnixSocketPattern* = "/unix/tmp/nim-p2pd-$1-$2.sock"
   DefaultIpSocketPattern* = "/ip4/127.0.0.1/tcp/$2"
@@ -65,17 +66,8 @@ type
     SUBSCRIBE = 3
 
   ResponseKind* = enum
-    Malformed,
-    Error,
-    Success
-
-  ResponseType* {.pure.} = enum
-    ERROR = 2,
-    STREAMINFO = 3,
-    IDENTITY = 4,
-    DHT = 5,
-    PEERINFO = 6
-    PUBSUB = 7
+    SUCCESS = 0,
+    ERROR = 1
 
   DHTResponseType* {.pure.} = enum
     BEGIN = 0,
@@ -133,6 +125,10 @@ type
     peer*: PeerID
     addresses*: seq[MultiAddress]
 
+  SerializablePeerInfo {.protobuf2.} = object
+    id {.fieldNumber: 1.}: Option[PeerID]
+    addresses {.fieldNumber: 2.}: seq[string]
+
   PubsubTicket* = ref object
     topic*: string
     handler*: P2PPubSubCallback
@@ -155,320 +151,342 @@ type
   DaemonRemoteError* = object of CatchableError
   DaemonLocalError* = object of CatchableError
 
+  SerializableProperties {.protobuf2.} = object
+    peerOrAddress {.fieldNumber: 1.}: seq[byte]
+    protocolsOrAddresses {.fieldNumber: 2.}: seq[seq[byte]]
+    timeout {.fieldNumber: 3, pint.}: PBOption[0'i32]
+
+  SerializableDHTProperties {.protobuf2.} = object
+    reqType {.fieldNumber: 1, required, pint.}: DHTRequestType
+    peer {.fieldNumber: 2.}: seq[byte]
+    cid {.fieldNumber: 3.}: seq[byte]
+    key {.fieldNumber: 4.}: PBOption[""]
+    value {.fieldNumber: 5.}: seq[byte]
+    count {.fieldNumber: 6, pint, required.}: int32
+    timeout {.fieldNumber: 7, pint.}: PBOption[0'i32]
+
+  SerializableCMProperties {.protobuf2.} = object
+    reqType {.fieldNumber: 1, required, pint.}: ConnManagerRequestType
+    peer {.fieldNumber: 2.}: seq[byte]
+    tag {.fieldNumber: 3.}: PBOption[""]
+    weight {.fieldNumber: 4, pint.}: PBOption[0'i64]
+
+  SerializablePSProperties {.protobuf2.} = object
+    reqType {.fieldNumber: 1, required, pint.}: PSRequestType
+    topic {.fieldNumber: 2.}: PBOption[""]
+    data {.fieldNumber: 3.}: seq[byte]
+
+  SerializableRequest {.protobuf2.} = object
+    reqType {.fieldNumber: 1, required, pint.}: RequestType
+    connectProperties {.fieldNumber: 2.}: Option[SerializableProperties]
+    streamOpenProperties {.fieldNumber: 3.}: Option[SerializableProperties]
+    streamHandleProperties {.fieldNumber: 4.}: Option[SerializableProperties]
+    dhtProperties {.fieldNumber: 5.}: Option[SerializableDHTProperties]
+    cmProperties {.fieldNumber: 6.}: Option[SerializableCMProperties]
+    disconnectProperties {.fieldNumber: 7.}: Option[SerializableProperties]
+    psProperties {.fieldNumber: 8.}: Option[SerializablePSProperties]
+
+  SerializableError {.protobuf2.} = object
+    msg {.fieldNumber: 1.}: PBOption[""]
+
+  SerializableStreamResponse {.protobuf2.} = object
+    peer {.fieldNumber: 1, required.}: seq[byte]
+    address {.fieldNumber: 2, required.}: seq[byte]
+    proto {.fieldNumber: 3, required.}: string
+
+  SerializableDHTResponse {.protobuf2.} = object
+    kind {.fieldNumber: 1, pint, required.}: DHTResponseType
+    peer {.fieldNumber: 2.}: Option[SerializableProperties]
+    value {.fieldNumber: 3.}: seq[byte]
+
+  SerializableTopicsResponse {.protobuf2.} = object
+    topics {.fieldNumber: 1.}: seq[string]
+    peerIDs {.fieldNumber: 2.}: seq[seq[byte]]
+
+  SerializablePubSubResponse {.protobuf2.} = object
+    peer {.fieldNumber: 1.}: seq[byte]
+    data {.fieldNumber: 2.}: seq[byte]
+    seqno {.fieldNumber: 3.}: seq[byte]
+    topics {.fieldNumber: 4.}: seq[string]
+    signature {.fieldNumber: 5.}: seq[byte]
+    key {.fieldNumber: 6.}: seq[byte]
+
+  SerializableResponse {.protobuf2.} = object
+    kind {.fieldNumber: 1, required, pint.}: ResponseKind
+    error {.fieldNumber: 2.}: Option[SerializableError]
+    streamInfo {.fieldNumber: 3.}: Option[SerializableStreamResponse]
+    identify {.fieldNumber: 4.}: Option[SerializableProperties]
+    dht {.fieldNumber: 5.}: Option[SerializableDHTResponse]
+    peers {.fieldNumber: 6.}: seq[SerializableProperties]
+    ps {.fieldNumber: 7.}: Option[SerializableTopicsResponse]
+
 var daemonsCount {.threadvar.}: int
 
-proc requestIdentity(): ProtoBuffer =
+proc requestIdentity(): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/conn.go
   ## Processing function `doIdentify(req *pb.Request)`.
-  result = initProtoBuffer({WithVarintLength})
-  result.write(initProtoField(1, cast[uint](RequestType.IDENTITY)))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.IDENTITY
+  ), {VarIntLengthPrefix})
 
 proc requestConnect(peerid: PeerID,
                     addresses: openarray[MultiAddress],
-                    timeout = 0): ProtoBuffer =
+                    timeout = 0): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/conn.go
   ## Processing function `doConnect(req *pb.Request)`.
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, peerid))
-  for item in addresses:
-    msg.write(initProtoField(2, item.data.buffer))
-  if timeout > 0:
-    msg.write(initProtoField(3, hint64(timeout)))
-  result.write(initProtoField(1, cast[uint](RequestType.CONNECT)))
-  result.write(initProtoField(2, msg))
-  result.finish()
+  var byteAddresses: seq[seq[byte]] = newSeq[seq[byte]](addresses.len)
+  for a in 0 ..< addresses.len:
+    byteAddresses[a] = addresses[a].data.buffer
 
-proc requestDisconnect(peerid: PeerID): ProtoBuffer =
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.CONNECT,
+    connectProperties: some(SerializableProperties(
+      peerOrAddress: peerid.data,
+      protocolsOrAddresses: byteAddresses,
+      timeout: pbSome(type(SerializableProperties.timeout),
+                       if timeout > 0: int32(timeout) else: int32(0))
+    ))
+  ), {VarIntLengthPrefix})
+
+proc requestDisconnect(peerid: PeerID): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/conn.go
   ## Processing function `doDisconnect(req *pb.Request)`.
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, peerid))
-  result.write(initProtoField(1, cast[uint](RequestType.DISCONNECT)))
-  result.write(initProtoField(7, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.DISCONNECT,
+    disconnectProperties: some(SerializableProperties(
+      peerOrAddress: peerid.data,
+    ))
+  ), {VarIntLengthPrefix})
 
 proc requestStreamOpen(peerid: PeerID,
                        protocols: openarray[string],
-                       timeout = 0): ProtoBuffer =
+                       timeout = 0): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/conn.go
   ## Processing function `doStreamOpen(req *pb.Request)`.
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, peerid))
-  for item in protocols:
-    msg.write(initProtoField(2, item))
-  if timeout > 0:
-    msg.write(initProtoField(3, hint64(timeout)))
-  result.write(initProtoField(1, cast[uint](RequestType.STREAM_OPEN)))
-  result.write(initProtoField(3, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.STREAM_OPEN,
+    streamOpenProperties: some(SerializableProperties(
+      peerOrAddress: peerid.data,
+      protocolsOrAddresses: cast[seq[seq[byte]]](@protocols),
+      timeout: pbSome(type(SerializableProperties.timeout),
+                       if timeout > 0: int32(timeout) else: int32(0))
+    ))
+  ), {VarIntLengthPrefix})
 
 proc requestStreamHandler(address: MultiAddress,
-                          protocols: openarray[MultiProtocol]): ProtoBuffer =
+                          protocols: openarray[MultiProtocol]): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/conn.go
   ## Processing function `doStreamHandler(req *pb.Request)`.
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, address.data.buffer))
-  for item in protocols:
-    msg.write(initProtoField(2, item))
-  result.write(initProtoField(1, cast[uint](RequestType.STREAM_HANDLER)))
-  result.write(initProtoField(4, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.STREAM_HANDLER,
+    streamHandleProperties: some(SerializableProperties(
+      peerOrAddress: address.data.buffer,
+      protocolsOrAddresses: cast[seq[seq[byte]]](@protocols)
+    ))
+  ), {VarIntLengthPrefix})
 
-proc requestListPeers(): ProtoBuffer =
+proc requestListPeers(): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/conn.go
   ## Processing function `doListPeers(req *pb.Request)`
-  result = initProtoBuffer({WithVarintLength})
-  result.write(initProtoField(1, cast[uint](RequestType.LIST_PEERS)))
-  result.finish()
+  Protobuf.encode(SerializableRequest(reqType: RequestType.LIST_PEERS), {VarIntLengthPrefix})
 
-proc requestDHTFindPeer(peer: PeerID, timeout = 0): ProtoBuffer =
+proc requestDHTFindPeer(peer: PeerID, timeout = 0): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/dht.go
   ## Processing function `doDHTFindPeer(req *pb.DHTRequest)`.
-  let msgid = cast[uint](DHTRequestType.FIND_PEER)
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, msgid))
-  msg.write(initProtoField(2, peer))
-  if timeout > 0:
-    msg.write(initProtoField(7, hint64(timeout)))
-  msg.finish()
-  result.write(initProtoField(1, cast[uint](RequestType.DHT)))
-  result.write(initProtoField(5, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.DHT,
+    dhtProperties: some(SerializableDHTProperties(
+        reqType: DHTRequestType.FIND_PEER,
+        peer: peer.data,
+        timeout: pbSome(type(SerializableDHTProperties.timeout),
+                         if timeout > 0: int32(timeout) else: int32(0))
+    ))
+  ), {VarIntLengthPrefix})
 
 proc requestDHTFindPeersConnectedToPeer(peer: PeerID,
-                                        timeout = 0): ProtoBuffer =
+                                        timeout = 0): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/dht.go
   ## Processing function `doDHTFindPeersConnectedToPeer(req *pb.DHTRequest)`.
-  let msgid = cast[uint](DHTRequestType.FIND_PEERS_CONNECTED_TO_PEER)
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, msgid))
-  msg.write(initProtoField(2, peer))
-  if timeout > 0:
-    msg.write(initProtoField(7, hint64(timeout)))
-  msg.finish()
-  result.write(initProtoField(1, cast[uint](RequestType.DHT)))
-  result.write(initProtoField(5, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.DHT,
+    dhtProperties: some(SerializableDHTProperties(
+        reqType: DHTRequestType.FIND_PEERS_CONNECTED_TO_PEER,
+        peer: peer.data,
+        timeout: pbSome(type(SerializableDHTProperties.timeout),
+                         if timeout > 0: int32(timeout) else: int32(0))
+    ))
+  ), {VarIntLengthPrefix})
 
 proc requestDHTFindProviders(cid: Cid,
-                             count: uint32, timeout = 0): ProtoBuffer =
+                             count: uint32, timeout = 0): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/dht.go
   ## Processing function `doDHTFindProviders(req *pb.DHTRequest)`.
-  let msgid = cast[uint](DHTRequestType.FIND_PROVIDERS)
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, msgid))
-  msg.write(initProtoField(3, cid.data.buffer))
-  msg.write(initProtoField(6, count))
-  if timeout > 0:
-    msg.write(initProtoField(7, hint64(timeout)))
-  msg.finish()
-  result.write(initProtoField(1, cast[uint](RequestType.DHT)))
-  result.write(initProtoField(5, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.DHT,
+    dhtProperties: some(SerializableDHTProperties(
+        reqType: DHTRequestType.FIND_PROVIDERS,
+        cid: cid.data.buffer,
+        count: int32(count),
+        timeout: pbSome(type(SerializableDHTProperties.timeout),
+                         if timeout > 0: int32(timeout) else: int32(0))
+    ))
+  ), {VarIntLengthPrefix})
 
-proc requestDHTGetClosestPeers(key: string, timeout = 0): ProtoBuffer =
+proc requestDHTGetClosestPeers(key: string, timeout = 0): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/dht.go
   ## Processing function `doDHTGetClosestPeers(req *pb.DHTRequest)`.
-  let msgid = cast[uint](DHTRequestType.GET_CLOSEST_PEERS)
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, msgid))
-  msg.write(initProtoField(4, key))
-  if timeout > 0:
-    msg.write(initProtoField(7, hint64(timeout)))
-  msg.finish()
-  result.write(initProtoField(1, cast[uint](RequestType.DHT)))
-  result.write(initProtoField(5, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.DHT,
+    dhtProperties: some(SerializableDHTProperties(
+        reqType: DHTRequestType.GET_CLOSEST_PEERS,
+        key: pbSome(type(SerializableDHTProperties.key), key),
+        timeout: pbSome(type(SerializableDHTProperties.timeout),
+                         if timeout > 0: int32(timeout) else: int32(0))
+    ))
+  ), {VarIntLengthPrefix})
 
-proc requestDHTGetPublicKey(peer: PeerID, timeout = 0): ProtoBuffer =
+proc requestDHTGetPublicKey(peer: PeerID, timeout = 0): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/dht.go
   ## Processing function `doDHTGetPublicKey(req *pb.DHTRequest)`.
-  let msgid = cast[uint](DHTRequestType.GET_PUBLIC_KEY)
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, msgid))
-  msg.write(initProtoField(2, peer))
-  if timeout > 0:
-    msg.write(initProtoField(7, hint64(timeout)))
-  msg.finish()
-  result.write(initProtoField(1, cast[uint](RequestType.DHT)))
-  result.write(initProtoField(5, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.DHT,
+    dhtProperties: some(SerializableDHTProperties(
+        reqType: DHTRequestType.GET_PUBLIC_KEY,
+        peer: peer.data,
+        timeout: pbSome(type(SerializableDHTProperties.timeout),
+                         if timeout > 0: int32(timeout) else: int32(0))
+    ))
+  ), {VarIntLengthPrefix})
 
-proc requestDHTGetValue(key: string, timeout = 0): ProtoBuffer =
+proc requestDHTGetValue(key: string, timeout = 0): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/dht.go
   ## Processing function `doDHTGetValue(req *pb.DHTRequest)`.
-  let msgid = cast[uint](DHTRequestType.GET_VALUE)
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, msgid))
-  msg.write(initProtoField(4, key))
-  if timeout > 0:
-    msg.write(initProtoField(7, hint64(timeout)))
-  msg.finish()
-  result.write(initProtoField(1, cast[uint](RequestType.DHT)))
-  result.write(initProtoField(5, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.DHT,
+    dhtProperties: some(SerializableDHTProperties(
+        reqType: DHTRequestType.GET_VALUE,
+        key: pbSome(type(SerializableDHTProperties.key), key),
+        timeout: pbSome(type(SerializableDHTProperties.timeout),
+                         if timeout > 0: int32(timeout) else: int32(0))
+    ))
+  ))
 
-proc requestDHTSearchValue(key: string, timeout = 0): ProtoBuffer =
+proc requestDHTSearchValue(key: string, timeout = 0): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/dht.go
   ## Processing function `doDHTSearchValue(req *pb.DHTRequest)`.
-  let msgid = cast[uint](DHTRequestType.SEARCH_VALUE)
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, msgid))
-  msg.write(initProtoField(4, key))
-  if timeout > 0:
-    msg.write(initProtoField(7, hint64(timeout)))
-  msg.finish()
-  result.write(initProtoField(1, cast[uint](RequestType.DHT)))
-  result.write(initProtoField(5, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.DHT,
+    dhtProperties: some(SerializableDHTProperties(
+        reqType: DHTRequestType.SEARCH_VALUE,
+        key: pbSome(type(SerializableDHTProperties.key), key),
+        timeout: pbSome(type(SerializableDHTProperties.timeout),
+                         if timeout > 0: int32(timeout) else: int32(0))
+    ))
+  ), {VarIntLengthPrefix})
 
 proc requestDHTPutValue(key: string, value: openarray[byte],
-                        timeout = 0): ProtoBuffer =
+                        timeout = 0): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/dht.go
   ## Processing function `doDHTPutValue(req *pb.DHTRequest)`.
-  let msgid = cast[uint](DHTRequestType.PUT_VALUE)
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, msgid))
-  msg.write(initProtoField(4, key))
-  msg.write(initProtoField(5, value))
-  if timeout > 0:
-    msg.write(initProtoField(7, hint64(timeout)))
-  msg.finish()
-  result.write(initProtoField(1, cast[uint](RequestType.DHT)))
-  result.write(initProtoField(5, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.DHT,
+    dhtProperties: some(SerializableDHTProperties(
+        reqType: DHTRequestType.PUT_VALUE,
+        key: pbSome(type(SerializableDHTProperties.key), key),
+        value: @value,
+        timeout: pbSome(type(SerializableDHTProperties.timeout),
+                         if timeout > 0: int32(timeout) else: int32(0))
+    ))
+  ), {VarIntLengthPrefix})
 
-proc requestDHTProvide(cid: Cid, timeout = 0): ProtoBuffer =
+proc requestDHTProvide(cid: Cid, timeout = 0): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/dht.go
   ## Processing function `doDHTProvide(req *pb.DHTRequest)`.
-  let msgid = cast[uint](DHTRequestType.PROVIDE)
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, msgid))
-  msg.write(initProtoField(3, cid.data.buffer))
-  if timeout > 0:
-    msg.write(initProtoField(7, hint64(timeout)))
-  msg.finish()
-  result.write(initProtoField(1, cast[uint](RequestType.DHT)))
-  result.write(initProtoField(5, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.DHT,
+    dhtProperties: some(SerializableDHTProperties(
+        reqType: DHTRequestType.PROVIDE,
+        cid: cid.data.buffer,
+        timeout: pbSome(type(SerializableDHTProperties.timeout),
+                         if timeout > 0: int32(timeout) else: int32(0))
+    ))
+  ), {VarIntLengthPrefix})
 
-proc requestCMTagPeer(peer: PeerID, tag: string, weight: int): ProtoBuffer =
+proc requestCMTagPeer(peer: PeerID, tag: string, weight: int): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/connmgr.go#L18
-  let msgid = cast[uint](ConnManagerRequestType.TAG_PEER)
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, msgid))
-  msg.write(initProtoField(2, peer))
-  msg.write(initProtoField(3, tag))
-  msg.write(initProtoField(4, hint64(weight)))
-  msg.finish()
-  result.write(initProtoField(1, cast[uint](RequestType.CONNMANAGER)))
-  result.write(initProtoField(6, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.CONNMANAGER,
+    cmProperties: some(SerializableCMProperties(
+      reqType: ConnManagerRequestType.TAG_PEER,
+      peer: peer.data,
+      tag: pbSome(type(SerializableCMProperties.tag), tag),
+      weight: pbSome(type(SerializableCMProperties.weight), int64(weight))
+    ))
+  ))
 
-proc requestCMUntagPeer(peer: PeerID, tag: string): ProtoBuffer =
+proc requestCMUntagPeer(peer: PeerID, tag: string): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/connmgr.go#L33
-  let msgid = cast[uint](ConnManagerRequestType.UNTAG_PEER)
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, msgid))
-  msg.write(initProtoField(2, peer))
-  msg.write(initProtoField(3, tag))
-  msg.finish()
-  result.write(initProtoField(1, cast[uint](RequestType.CONNMANAGER)))
-  result.write(initProtoField(6, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.CONNMANAGER,
+    cmProperties: some(SerializableCMProperties(
+      reqType: ConnManagerRequestType.UNTAG_PEER,
+      peer: peer.data,
+      tag: pbSome(type(SerializableCMProperties.tag), tag)
+    ))
+  ), {VarIntLengthPrefix})
 
-proc requestCMTrim(): ProtoBuffer =
+proc requestCMTrim(): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/connmgr.go#L47
-  let msgid = cast[uint](ConnManagerRequestType.TRIM)
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, msgid))
-  msg.finish()
-  result.write(initProtoField(1, cast[uint](RequestType.CONNMANAGER)))
-  result.write(initProtoField(6, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.CONNMANAGER,
+    cmProperties: some(SerializableCMProperties(
+      reqType: ConnManagerRequestType.TRIM
+    ))
+  ), {VarIntLengthPrefix})
 
-proc requestPSGetTopics(): ProtoBuffer =
+proc requestPSGetTopics(): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/pubsub.go
   ## Processing function `doPubsubGetTopics(req *pb.PSRequest)`.
-  let msgid = cast[uint](PSRequestType.GET_TOPICS)
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, msgid))
-  msg.finish()
-  result.write(initProtoField(1, cast[uint](RequestType.PUBSUB)))
-  result.write(initProtoField(8, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.PUBSUB,
+    psProperties: some(SerializablePSProperties(
+      reqType: PSRequestType.GET_TOPICS
+    ))
+  ), {VarIntLengthPrefix})
 
-proc requestPSListPeers(topic: string): ProtoBuffer =
+proc requestPSListPeers(topic: string): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/pubsub.go
   ## Processing function `doPubsubListPeers(req *pb.PSRequest)`.
-  let msgid = cast[uint](PSRequestType.LIST_PEERS)
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, msgid))
-  msg.write(initProtoField(2, topic))
-  msg.finish()
-  result.write(initProtoField(1, cast[uint](RequestType.PUBSUB)))
-  result.write(initProtoField(8, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.PUBSUB,
+    psProperties: some(SerializablePSProperties(
+      reqType: PSRequestType.LIST_PEERS,
+      topic: pbSome(type(SerializablePSProperties.topic), topic)
+    ))
+  ), {VarIntLengthPrefix})
 
-proc requestPSPublish(topic: string, data: openarray[byte]): ProtoBuffer =
+proc requestPSPublish(topic: string, data: openarray[byte]): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/pubsub.go
   ## Processing function `doPubsubPublish(req *pb.PSRequest)`.
-  let msgid = cast[uint](PSRequestType.PUBLISH)
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, msgid))
-  msg.write(initProtoField(2, topic))
-  msg.write(initProtoField(3, data))
-  msg.finish()
-  result.write(initProtoField(1, cast[uint](RequestType.PUBSUB)))
-  result.write(initProtoField(8, msg))
-  result.finish()
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.PUBSUB,
+    psProperties: some(SerializablePSProperties(
+      reqType: PSRequestType.PUBLISH,
+      topic: pbSome(type(SerializablePSProperties.topic), topic),
+      data: @data
+    ))
+  ), {VarIntLengthPrefix})
 
-proc requestPSSubscribe(topic: string): ProtoBuffer =
+proc requestPSSubscribe(topic: string): seq[byte] =
   ## https://github.com/libp2p/go-libp2p-daemon/blob/master/pubsub.go
   ## Processing function `doPubsubSubscribe(req *pb.PSRequest)`.
-  let msgid = cast[uint](PSRequestType.SUBSCRIBE)
-  result = initProtoBuffer({WithVarintLength})
-  var msg = initProtoBuffer()
-  msg.write(initProtoField(1, msgid))
-  msg.write(initProtoField(2, topic))
-  msg.finish()
-  result.write(initProtoField(1, cast[uint](RequestType.PUBSUB)))
-  result.write(initProtoField(8, msg))
-  result.finish()
-
-proc checkResponse(pb: var ProtoBuffer): ResponseKind {.inline.} =
-  result = ResponseKind.Malformed
-  var value: uint64
-  if getVarintValue(pb, 1, value) > 0:
-    if value == 0:
-      result = ResponseKind.Success
-    else:
-      result = ResponseKind.Error
-
-proc getErrorMessage(pb: var ProtoBuffer): string {.inline.} =
-  if pb.enterSubmessage() == cast[int](ResponseType.ERROR):
-    if pb.getString(1, result) == -1:
-      raise newException(DaemonLocalError, "Error message is missing!")
+  Protobuf.encode(SerializableRequest(
+    reqType: RequestType.PUBSUB,
+    psProperties: some(SerializablePSProperties(
+      reqType: PSRequestType.SUBSCRIBE,
+      topic: pbSome(type(SerializablePSProperties.topic), topic)
+    ))
+  ), {VarIntLengthPrefix})
 
 proc recvMessage(conn: StreamTransport): Future[seq[byte]] {.async.} =
   var
@@ -802,47 +820,38 @@ proc close*(api: DaemonAPI) {.async.} =
   if address.family == AddressFamily.Unix:
     discard tryRemoveFile($address)
 
-template withMessage(m, body: untyped): untyped =
-  let kind = m.checkResponse()
-  if kind == ResponseKind.Error:
-    raise newException(DaemonRemoteError, m.getErrorMessage())
-  elif kind == ResponseKind.Malformed:
-    raise newException(DaemonLocalError, "Malformed message received!")
-  else:
-    body
-
 proc transactMessage(transp: StreamTransport,
-                     pb: ProtoBuffer): Future[ProtoBuffer] {.async.} =
-  let length = pb.getLen()
-  let res = await transp.write(pb.getPtr(), length)
+                     pbArg: seq[byte]): Future[SerializableResponse] {.async.} =
+  var pb = pbArg
+  let length = pb.len
+  let res = await transp.write(addr pb[0], length)
   if res != length:
     raise newException(DaemonLocalError, "Could not send message to daemon!")
   var message = await transp.recvMessage()
   if len(message) == 0:
     raise newException(DaemonLocalError, "Incorrect or empty message received!")
-  result = initProtoBuffer(message)
+  try:
+    result = Protobuf.decode(message, SerializableResponse)
+  except ProtobufReadError:
+    raise newException(DaemonLocalError, "Incorrect message received!")
 
-proc getPeerInfo(pb: var ProtoBuffer): PeerInfo =
-  ## Get PeerInfo object from ``pb``.
-  result.addresses = newSeq[MultiAddress]()
-  if pb.getValue(1, result.peer) == -1:
-    raise newException(DaemonLocalError, "Missing required field `peer`!")
-  var address = newSeq[byte]()
-  while pb.getBytes(2, address) != -1:
-    if len(address) != 0:
-      var copyaddr = address
-      result.addresses.add(MultiAddress.init(copyaddr).tryGet())
-      address.setLen(0)
+proc getPeer(res: SerializableProperties | SerializableStreamResponse): PeerInfo =
+  when res is SerializableProperties:
+    result = PeerInfo(peer: PeerID(data: res.peerOrAddress))
+  else:
+    result = PeerInfo(peer: PeerID(data: res.peer))
+
+  when res is SerializableProperties:
+    for address in res.protocolsOrAddresses:
+      result.addresses.add(MultiAddress.init(address).tryGet())
 
 proc identity*(api: DaemonAPI): Future[PeerInfo] {.async.} =
   ## Get Node identity information
   var transp = await api.newConnection()
   try:
-    var pb = await transactMessage(transp, requestIdentity())
-    pb.withMessage() do:
-      let res = pb.enterSubmessage()
-      if res == cast[int](ResponseType.IDENTITY):
-        result = pb.getPeerInfo()
+    let res = await transactMessage(transp, requestIdentity())
+    if res.identify.isSome():
+      result = getPeer(res.identify.get())
   finally:
     await api.closeConnection(transp)
 
@@ -852,10 +861,7 @@ proc connect*(api: DaemonAPI, peer: PeerID,
   ## Connect to remote peer with id ``peer`` and addresses ``addresses``.
   var transp = await api.newConnection()
   try:
-    var pb = await transp.transactMessage(requestConnect(peer, addresses,
-                                                         timeout))
-    pb.withMessage() do:
-      discard
+    discard await transp.transactMessage(requestConnect(peer, addresses, timeout))
   except:
     await api.closeConnection(transp)
 
@@ -863,9 +869,7 @@ proc disconnect*(api: DaemonAPI, peer: PeerID) {.async.} =
   ## Disconnect from remote peer with id ``peer``.
   var transp = await api.newConnection()
   try:
-    var pb = await transp.transactMessage(requestDisconnect(peer))
-    pb.withMessage() do:
-      discard
+    discard await transp.transactMessage(requestDisconnect(peer))
   finally:
     await api.closeConnection(transp)
 
@@ -875,44 +879,30 @@ proc openStream*(api: DaemonAPI, peer: PeerID,
   ## Open new stream to peer ``peer`` using one of the protocols in
   ## ``protocols``. Returns ``StreamTransport`` for the stream.
   var transp = await api.newConnection()
-  var stream = new P2PStream
+  result = new P2PStream
   try:
-    var pb = await transp.transactMessage(requestStreamOpen(peer, protocols,
-                                                            timeout))
-    pb.withMessage() do:
-      var res = pb.enterSubmessage()
-      if res == cast[int](ResponseType.STREAMINFO):
-        # stream.peer = newSeq[byte]()
-        var raddress = newSeq[byte]()
-        stream.protocol = ""
-        if pb.getValue(1, stream.peer) == -1:
-          raise newException(DaemonLocalError, "Missing `peer` field!")
-        if pb.getLengthValue(2, raddress) == -1:
-          raise newException(DaemonLocalError, "Missing `address` field!")
-        stream.raddress = MultiAddress.init(raddress).tryGet()
-        if pb.getLengthValue(3, stream.protocol) == -1:
-          raise newException(DaemonLocalError, "Missing `proto` field!")
-        stream.flags.incl(Outbound)
-        stream.transp = transp
-        result = stream
+    var pb = await transp.transactMessage(requestStreamOpen(peer, protocols, timeout))
+
+    if pb.streamInfo.isSome():
+      result.protocol = ""
+      result.peer = pb.streamInfo.get().getPeer().peer
+      result.raddress = MultiAddress.init(pb.streamInfo.get().address).tryGet()
+      result.protocol = pb.streamInfo.get().proto
+      result.flags.incl(Outbound)
+      result.transp = transp
   except Exception as exc:
     await api.closeConnection(transp)
     raise exc
 
 proc streamHandler(server: StreamServer, transp: StreamTransport) {.async.} =
-  var api = getUserData[DaemonAPI](server)
-  var message = await transp.recvMessage()
-  var pb = initProtoBuffer(message)
-  var stream = new P2PStream
-  var raddress = newSeq[byte]()
-  stream.protocol = ""
-  if pb.getValue(1, stream.peer) == -1:
-    raise newException(DaemonLocalError, "Missing `peer` field!")
-  if pb.getLengthValue(2, raddress) == -1:
-    raise newException(DaemonLocalError, "Missing `address` field!")
-  stream.raddress = MultiAddress.init(raddress).tryGet()
-  if pb.getLengthValue(3, stream.protocol) == -1:
-    raise newException(DaemonLocalError, "Missing `proto` field!")
+  var
+    api = getUserData[DaemonAPI](server)
+    message = await transp.recvMessage()
+    res = Protobuf.decode(message, SerializableStreamResponse)
+    stream = new P2PStream
+  stream.protocol = res.proto
+  stream.peer = res.getPeer().peer
+  stream.raddress = MultiAddress.init(res.address).tryGet()
   stream.flags.incl(Inbound)
   stream.transp = transp
   if len(stream.protocol) > 0:
@@ -930,10 +920,9 @@ proc addHandler*(api: DaemonAPI, protocols: seq[string],
     for item in protocols:
       api.handlers[item] = handler
     server.start()
-    var pb = await transp.transactMessage(requestStreamHandler(maddress,
+    discard await transp.transactMessage(requestStreamHandler(maddress,
                                                                protocols))
-    pb.withMessage() do:
-      api.servers.add(P2PServer(server: server, address: maddress))
+    api.servers.add(P2PServer(server: server, address: maddress))
   except Exception as exc:
     for item in protocols:
       api.handlers.del(item)
@@ -948,17 +937,10 @@ proc listPeers*(api: DaemonAPI): Future[seq[PeerInfo]] {.async.} =
   ## Get list of remote peers to which we are currently connected.
   var transp = await api.newConnection()
   try:
-    var pb = await transp.transactMessage(requestListPeers())
-    pb.withMessage() do:
-      result = newSeq[PeerInfo]()
-      var res = pb.enterSubmessage()
-      while res != 0:
-        if res == cast[int](ResponseType.PEERINFO):
-          var peer = pb.getPeerInfo()
-          result.add(peer)
-        else:
-          pb.skipSubmessage()
-        res = pb.enterSubmessage()
+    var res = await transp.transactMessage(requestListPeers())
+    result = newSeq[PeerInfo]()
+    for peer in res.peers:
+      result.add(peer.getPeer())
   finally:
     await api.closeConnection(transp)
 
@@ -967,9 +949,7 @@ proc cmTagPeer*(api: DaemonAPI, peer: PeerID, tag: string,
   ## Tag peer with id ``peer`` using ``tag`` and ``weight``.
   var transp = await api.newConnection()
   try:
-    var pb = await transp.transactMessage(requestCMTagPeer(peer, tag, weight))
-    withMessage(pb) do:
-      discard
+    discard await transp.transactMessage(requestCMTagPeer(peer, tag, weight))
   finally:
     await api.closeConnection(transp)
 
@@ -977,9 +957,7 @@ proc cmUntagPeer*(api: DaemonAPI, peer: PeerID, tag: string) {.async.} =
   ## Remove tag ``tag`` from peer with id ``peer``.
   var transp = await api.newConnection()
   try:
-    var pb = await transp.transactMessage(requestCMUntagPeer(peer, tag))
-    withMessage(pb) do:
-      discard
+    discard await transp.transactMessage(requestCMUntagPeer(peer, tag))
   finally:
     await api.closeConnection(transp)
 
@@ -987,57 +965,9 @@ proc cmTrimPeers*(api: DaemonAPI) {.async.} =
   ## Trim all connections.
   var transp = await api.newConnection()
   try:
-    var pb = await transp.transactMessage(requestCMTrim())
-    withMessage(pb) do:
-      discard
+    discard await transp.transactMessage(requestCMTrim())
   finally:
     await api.closeConnection(transp)
-
-proc dhtGetSinglePeerInfo(pb: var ProtoBuffer): PeerInfo =
-  if pb.enterSubmessage() == 2:
-    result = pb.getPeerInfo()
-  else:
-    raise newException(DaemonLocalError, "Missing required field `peer`!")
-
-proc dhtGetSingleValue(pb: var ProtoBuffer): seq[byte] =
-  result = newSeq[byte]()
-  if pb.getLengthValue(3, result) == -1:
-    raise newException(DaemonLocalError, "Missing field `value`!")
-
-proc dhtGetSinglePublicKey(pb: var ProtoBuffer): PublicKey =
-  if pb.getValue(3, result) == -1:
-    raise newException(DaemonLocalError, "Missing field `value`!")
-
-proc dhtGetSinglePeerID(pb: var ProtoBuffer): PeerID =
-  if pb.getValue(3, result) == -1:
-    raise newException(DaemonLocalError, "Missing field `value`!")
-
-proc enterDhtMessage(pb: var ProtoBuffer, rt: DHTResponseType) {.inline.} =
-  var dtype: uint
-  var res = pb.enterSubmessage()
-  if res == cast[int](ResponseType.DHT):
-    if pb.getVarintValue(1, dtype) == 0:
-      raise newException(DaemonLocalError, "Missing required DHT field `type`!")
-    if dtype != cast[uint](rt):
-      raise newException(DaemonLocalError, "Wrong DHT answer type! ")
-  else:
-    raise newException(DaemonLocalError, "Wrong message type!")
-
-proc enterPsMessage(pb: var ProtoBuffer) {.inline.} =
-  var res = pb.enterSubmessage()
-  if res != cast[int](ResponseType.PUBSUB):
-    raise newException(DaemonLocalError, "Wrong message type!")
-
-proc getDhtMessageType(pb: var ProtoBuffer): DHTResponseType {.inline.} =
-  var dtype: uint
-  if pb.getVarintValue(1, dtype) == 0:
-    raise newException(DaemonLocalError, "Missing required DHT field `type`!")
-  if dtype == cast[uint](DHTResponseType.VALUE):
-    result = DHTResponseType.VALUE
-  elif dtype == cast[uint](DHTResponseType.END):
-    result = DHTResponseType.END
-  else:
-    raise newException(DaemonLocalError, "Wrong DHT answer type!")
 
 proc dhtFindPeer*(api: DaemonAPI, peer: PeerID,
                   timeout = 0): Future[PeerInfo] {.async.} =
@@ -1047,10 +977,15 @@ proc dhtFindPeer*(api: DaemonAPI, peer: PeerID,
   ## means no timeout.
   var transp = await api.newConnection()
   try:
-    var pb = await transp.transactMessage(requestDHTFindPeer(peer, timeout))
-    withMessage(pb) do:
-      pb.enterDhtMessage(DHTResponseType.VALUE)
-      result = pb.dhtGetSinglePeerInfo()
+    var res = await transp.transactMessage(requestDHTFindPeer(peer, timeout))
+    if (
+      (res.dht.isSome()) and
+      (res.dht.get().kind == DHTResponseType.VALUE) and
+      (res.dht.get().peer.isSome())
+    ):
+      result = res.dht.get().peer.get().getPeer()
+    else:
+      raise newException(DaemonLocalError, "Missing required field or incorrect repsonse type!")
   finally:
     await api.closeConnection(transp)
 
@@ -1062,10 +997,12 @@ proc dhtGetPublicKey*(api: DaemonAPI, peer: PeerID,
   ## means no timeout.
   var transp = await api.newConnection()
   try:
-    var pb = await transp.transactMessage(requestDHTGetPublicKey(peer, timeout))
-    withMessage(pb) do:
-      pb.enterDhtMessage(DHTResponseType.VALUE)
-      result = pb.dhtGetSinglePublicKey()
+    var res = await transp.transactMessage(requestDHTGetPublicKey(peer, timeout))
+    if (res.dht.isSome()) and (res.dht.get().kind == DHTResponseType.VALUE):
+      if not result.init(res.dht.get().value):
+        raise newException(DaemonLocalError, "Missing field `value`!")
+    else:
+      raise newException(DaemonLocalError, "Missing required field or incorrect repsonse type!")
   finally:
     await api.closeConnection(transp)
 
@@ -1077,10 +1014,11 @@ proc dhtGetValue*(api: DaemonAPI, key: string,
   ## means no timeout.
   var transp = await api.newConnection()
   try:
-    var pb = await transp.transactMessage(requestDHTGetValue(key, timeout))
-    withMessage(pb) do:
-      pb.enterDhtMessage(DHTResponseType.VALUE)
-      result = pb.dhtGetSingleValue()
+    var res = await transp.transactMessage(requestDHTGetValue(key, timeout))
+    if (res.dht.isSome()) and (res.dht.get().kind == DHTResponseType.VALUE):
+      result = res.dht.get().value
+    else:
+      raise newException(DaemonLocalError, "Missing required field or incorrect repsonse type!")
   finally:
     await api.closeConnection(transp)
 
@@ -1092,10 +1030,8 @@ proc dhtPutValue*(api: DaemonAPI, key: string, value: seq[byte],
   ## means no timeout.
   var transp = await api.newConnection()
   try:
-    var pb = await transp.transactMessage(requestDHTPutValue(key, value,
+    discard await transp.transactMessage(requestDHTPutValue(key, value,
                                                              timeout))
-    withMessage(pb) do:
-      discard
   finally:
     await api.closeConnection(transp)
 
@@ -1106,9 +1042,7 @@ proc dhtProvide*(api: DaemonAPI, cid: Cid, timeout = 0) {.async.} =
   ## means no timeout.
   var transp = await api.newConnection()
   try:
-    var pb = await transp.transactMessage(requestDHTProvide(cid, timeout))
-    withMessage(pb) do:
-      discard
+    discard await transp.transactMessage(requestDHTProvide(cid, timeout))
   finally:
     await api.closeConnection(transp)
 
@@ -1119,21 +1053,18 @@ proc dhtFindPeersConnectedToPeer*(api: DaemonAPI, peer: PeerID,
   ## You can specify timeout for DHT request with ``timeout`` value. ``0`` value
   ## means no timeout.
   var transp = await api.newConnection()
-  var list = newSeq[PeerInfo]()
   try:
-    let spb = requestDHTFindPeersConnectedToPeer(peer, timeout)
-    var pb = await transp.transactMessage(spb)
-    withMessage(pb) do:
-      pb.enterDhtMessage(DHTResponseType.BEGIN)
+    var res = await transp.transactMessage(requestDHTFindPeersConnectedToPeer(peer, timeout))
+    if (res.dht.isSome()) and (res.dht.get().kind == DHTResponseType.BEGIN):
       while true:
         var message = await transp.recvMessage()
         if len(message) == 0:
           break
-        var cpb = initProtoBuffer(message)
-        if cpb.getDhtMessageType() == DHTResponseType.END:
+        var subRes = Protobuf.decode(message, SerializableDHTResponse)
+        if subRes.kind == DHTResponseType.END:
           break
-        list.add(cpb.dhtGetSinglePeerInfo())
-      result = list
+        if subRes.peer.isSome():
+          result.add(subRes.peer.get().getPeer())
   finally:
     await api.closeConnection(transp)
 
@@ -1144,21 +1075,17 @@ proc dhtGetClosestPeers*(api: DaemonAPI, key: string,
   ## You can specify timeout for DHT request with ``timeout`` value. ``0`` value
   ## means no timeout.
   var transp = await api.newConnection()
-  var list = newSeq[PeerID]()
   try:
-    let spb = requestDHTGetClosestPeers(key, timeout)
-    var pb = await transp.transactMessage(spb)
-    withMessage(pb) do:
-      pb.enterDhtMessage(DHTResponseType.BEGIN)
+    var res = await transp.transactMessage(requestDHTGetClosestPeers(key, timeout))
+    if res.dht.isSome() and (res.dht.get().kind == DHTResponseType.BEGIN):
       while true:
         var message = await transp.recvMessage()
-        if len(message) == 0:
+        let subRes = Protobuf.decode(message, SerializableDHTResponse)
+        if (len(message) == 0) or (subRes.kind == DHTResponseType.END):
           break
-        var cpb = initProtoBuffer(message)
-        if cpb.getDhtMessageType() == DHTResponseType.END:
-          break
-        list.add(cpb.dhtGetSinglePeerID())
-      result = list
+        if subRes.value.len == 0:
+          raise newException(DaemonLocalError, "Missing field `value`!")
+        result.add(PeerID(data: subRes.value))
   finally:
     await api.closeConnection(transp)
 
@@ -1171,19 +1098,15 @@ proc dhtFindProviders*(api: DaemonAPI, cid: Cid, count: uint32,
   var transp = await api.newConnection()
   var list = newSeq[PeerInfo]()
   try:
-    let spb = requestDHTFindProviders(cid, count, timeout)
-    var pb = await transp.transactMessage(spb)
-    withMessage(pb) do:
-      pb.enterDhtMessage(DHTResponseType.BEGIN)
+    var res = await transp.transactMessage(requestDHTFindProviders(cid, count, timeout))
+    if res.dht.isSome() and (res.dht.get().kind == DHTResponseType.BEGIN):
       while true:
         var message = await transp.recvMessage()
-        if len(message) == 0:
+        let subRes = Protobuf.decode(message, SerializableDHTResponse)
+        if (len(message) == 0) or (subRes.kind == DHTResponseType.END):
           break
-        var cpb = initProtoBuffer(message)
-        if cpb.getDhtMessageType() == DHTResponseType.END:
-          break
-        list.add(cpb.dhtGetSinglePeerInfo())
-      result = list
+        if subRes.peer.isSome():
+          result.add(subRes.peer.get().getPeer())
   finally:
     await api.closeConnection(transp)
 
@@ -1196,18 +1119,16 @@ proc dhtSearchValue*(api: DaemonAPI, key: string,
   var transp = await api.newConnection()
   var list = newSeq[seq[byte]]()
   try:
-    var pb = await transp.transactMessage(requestDHTSearchValue(key, timeout))
-    withMessage(pb) do:
-      pb.enterDhtMessage(DHTResponseType.BEGIN)
+    var res = await transp.transactMessage(requestDHTSearchValue(key, timeout))
+    if res.dht.isSome() and (res.dht.get().kind == DHTResponseType.BEGIN):
       while true:
         var message = await transp.recvMessage()
-        if len(message) == 0:
+        let subRes = Protobuf.decode(message, SerializableDHTResponse)
+        if (len(message) == 0) or (subRes.kind == DHTResponseType.END):
           break
-        var cpb = initProtoBuffer(message)
-        if cpb.getDhtMessageType() == DHTResponseType.END:
-          break
-        list.add(cpb.dhtGetSingleValue())
-      result = list
+        result.add(subRes.value)
+        if result[^1].len == 0:
+          raise newException(DaemonLocalError, "Missing field `value`!")
   finally:
     await api.closeConnection(transp)
 
@@ -1215,15 +1136,9 @@ proc pubsubGetTopics*(api: DaemonAPI): Future[seq[string]] {.async.} =
   ## Get list of topics this node is subscribed to.
   var transp = await api.newConnection()
   try:
-    var pb = await transp.transactMessage(requestPSGetTopics())
-    withMessage(pb) do:
-      pb.enterPsMessage()
-      var topics = newSeq[string]()
-      var topic = ""
-      while pb.getString(1, topic) != -1:
-        topics.add(topic)
-        topic.setLen(0)
-      result = topics
+    var res = await transp.transactMessage(requestPSGetTopics())
+    if res.ps.isSome():
+      result = res.ps.get().topics
   finally:
     await api.closeConnection(transp)
 
@@ -1233,14 +1148,10 @@ proc pubsubListPeers*(api: DaemonAPI,
   ## ``topic``.
   var transp = await api.newConnection()
   try:
-    var pb = await transp.transactMessage(requestPSListPeers(topic))
-    withMessage(pb) do:
-      var peer: PeerID
-      pb.enterPsMessage()
-      var peers = newSeq[PeerID]()
-      while pb.getValue(2, peer) != -1:
-        peers.add(peer)
-      result = peers
+    var res = await transp.transactMessage(requestPSListPeers(topic))
+    if res.ps.isSome():
+      for id in res.ps.get().peerIDs:
+        result.add(PeerID(data: id))
   finally:
     await api.closeConnection(transp)
 
@@ -1249,38 +1160,28 @@ proc pubsubPublish*(api: DaemonAPI, topic: string,
   ## Get list of peer identifiers which are subscribed to topic ``topic``.
   var transp = await api.newConnection()
   try:
-    var pb = await transp.transactMessage(requestPSPublish(topic, value))
-    withMessage(pb) do:
-      discard
+    discard await transp.transactMessage(requestPSPublish(topic, value))
   finally:
     await api.closeConnection(transp)
-
-proc getPubsubMessage*(pb: var ProtoBuffer): PubSubMessage =
-  result.data = newSeq[byte]()
-  result.seqno = newSeq[byte]()
-  discard pb.getValue(1, result.peer)
-  discard pb.getBytes(2, result.data)
-  discard pb.getBytes(3, result.seqno)
-  var item = newSeq[byte]()
-  while true:
-    if pb.getBytes(4, item) == -1:
-      break
-    var copyitem = item
-    var stritem = cast[string](copyitem)
-    if len(result.topics) == 0:
-      result.topics = newSeq[string]()
-    result.topics.add(stritem)
-    item.setLen(0)
-  discard pb.getValue(5, result.signature)
-  discard pb.getValue(6, result.key)
 
 proc pubsubLoop(api: DaemonAPI, ticket: PubsubTicket) {.async.} =
   while true:
     var pbmessage = await ticket.transp.recvMessage()
     if len(pbmessage) == 0:
       break
-    var pb = initProtoBuffer(pbmessage)
-    var message = pb.getPubsubMessage()
+    let serializable = Protobuf.decode(pbMessage, SerializablePubSubResponse)
+    var message = PubSubMessage(
+      peer: PeerID(data: serializable.peer),
+      data: serializable.data,
+      seqno: serializable.seqno,
+      topics: serializable.topics
+    )
+    if not message.peer.validate():
+      raise newException(DaemonLocalError, "Missing required field `peer`!")
+    if not message.signature.init(serializable.signature):
+      raise newException(DaemonLocalError, "Missing required field `signature`!")
+    if not message.key.init(serializable.key):
+      raise newException(DaemonLocalError, "Missing required field `key`!")
     ## We can do here `await` too
     let res = await ticket.handler(api, ticket, message)
     if not res:
@@ -1293,14 +1194,12 @@ proc pubsubSubscribe*(api: DaemonAPI, topic: string,
   ## Subscribe to topic ``topic``.
   var transp = await api.newConnection()
   try:
-    var pb = await transp.transactMessage(requestPSSubscribe(topic))
-    pb.withMessage() do:
-      var ticket = new PubsubTicket
-      ticket.topic = topic
-      ticket.handler = handler
-      ticket.transp = transp
-      asyncCheck pubsubLoop(api, ticket)
-      result = ticket
+    discard await transp.transactMessage(requestPSSubscribe(topic))
+    result = new PubsubTicket
+    result.topic = topic
+    result.handler = handler
+    result.transp = transp
+    asyncCheck pubsubLoop(api, result)
   except Exception as exc:
     await api.closeConnection(transp)
     raise exc

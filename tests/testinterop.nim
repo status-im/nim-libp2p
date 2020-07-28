@@ -3,7 +3,6 @@ import unittest
 import chronos, chronicles, stew/byteutils
 import helpers
 import ../libp2p/[daemon/daemonapi,
-                  protobuf/minprotobuf,
                   vbuffer,
                   multiaddress,
                   multicodec,

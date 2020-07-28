@@ -8,51 +8,53 @@
 ## those terms.
 
 import options, sequtils
+import protobuf_serialization
 import ../../../utility
 import ../../../peerid
 
 export options
+export protobuf_serialization
 
 type
-    SubOpts* = object
-      subscribe*: bool
-      topic*: string
+    SubOpts* {.protobuf2.} = object
+      subscribe* {.fieldNumber: 1, required.}: bool
+      topic* {.fieldNumber: 2, required.}: string
 
-    Message* = object
-      fromPeer*: PeerId
-      data*: seq[byte]
-      seqno*: seq[byte]
-      topicIDs*: seq[string]
-      signature*: seq[byte]
-      key*: seq[byte]
+    Message* {.protobuf2.} = object
+      fromPeer* {.fieldNumber: 1, required.}: seq[byte]
+      data* {.fieldNumber: 2, required.}: seq[byte]
+      seqno* {.fieldNumber: 3, required.}: seq[byte]
+      topicIDs* {.fieldNumber: 4.}: seq[string]
+      signature* {.fieldNumber: 5.}: seq[byte]
+      key* {.fieldNumber: 6.}: seq[byte]
 
-    ControlMessage* = object
-      ihave*: seq[ControlIHave]
-      iwant*: seq[ControlIWant]
-      graft*: seq[ControlGraft]
-      prune*: seq[ControlPrune]
+    ControlMessage* {.protobuf2.} = object
+      ihave* {.fieldNumber: 1.}: seq[ControlIHave]
+      iwant* {.fieldNumber: 2.}: seq[ControlIWant]
+      graft* {.fieldNumber: 3.}: seq[ControlGraft]
+      prune* {.fieldNumber: 4.}: seq[ControlPrune]
 
-    ControlIHave* = object
-      topicID*: string
-      messageIDs*: seq[string]
+    ControlIHave* {.protobuf2.} = object
+      topicID* {.fieldNumber: 1.}: PBOption[""]
+      messageIDs* {.fieldNumber: 2.}: seq[string]
 
-    ControlIWant* = object
-      messageIDs*: seq[string]
+    ControlIWant* {.protobuf2.} = object
+      messageIDs* {.fieldNumber: 1.}: seq[string]
 
-    ControlGraft* = object
-      topicID*: string
+    ControlGraft* {.protobuf2.} = object
+      topicID* {.fieldNumber: 1, required.}: string
 
-    ControlPrune* = object
-      topicID*: string
+    ControlPrune* {.protobuf2.} = object
+      topicID* {.fieldNumber: 1, required.}: string
 
-    RPCMsg* = object
-      subscriptions*: seq[SubOpts]
-      messages*: seq[Message]
-      control*: Option[ControlMessage]
+    RPCMsg* {.protobuf2.} = object
+      subscriptions* {.fieldNumber: 1.}: seq[SubOpts]
+      messages* {.fieldNumber: 2.}: seq[Message]
+      control* {.fieldNumber: 3.}: Option[ControlMessage]
 
 func shortLog*(s: ControlIHave): auto =
   (
-    topicID: s.topicID.shortLog,
+    topicID: s.topicID.get().shortLog,
     messageIDs: mapIt(s.messageIDs, it.shortLog)
   )
 

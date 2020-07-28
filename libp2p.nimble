@@ -14,7 +14,8 @@ requires "nim >= 1.2.0",
          "chronos >= 2.3.8",
          "metrics",
          "secp256k1",
-         "stew >= 0.1.0"
+         "stew >= 0.1.0",
+         "https://github.com/status-im/nim-protobuf-serialization >= 0.2.0"
 
 proc runTest(filename: string, verify: bool = true, sign: bool = true,
              moreoptions: string = "") =

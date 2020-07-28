@@ -8,7 +8,7 @@
 ## those terms.
 
 import std/[tables, sequtils, sets]
-import chronos, chronicles, metrics
+import chronos, chronicles, metrics, protobuf_serialization
 import pubsubpeer,
        rpc/[message, messages],
        ../protocol,

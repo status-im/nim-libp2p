@@ -11,6 +11,8 @@
 {.push raises: [Defect].}
 from strutils import split, strip, cmpIgnoreCase
 
+import protobuf_serialization
+
 const libp2p_pki_schemes* {.strdefine.} = "rsa,ed25519,secp256k1,ecnist"
 
 type
@@ -69,7 +71,7 @@ when supported(PKScheme.Secp256k1):
 # but it will be impossible to create ECNIST keys or import ECNIST keys.
 
 import ecnist, bearssl
-import ../protobuf/minprotobuf, ../vbuffer, ../multihash, ../multicodec
+import ../vbuffer, ../multihash, ../multicodec
 import nimcrypto/[rijndael, twofish, sha2, hash, hmac, utils]
 import ../utility
 import stew/results
@@ -153,6 +155,21 @@ type
     SchemeError
 
   CryptoResult*[T] = Result[T, CryptoError]
+
+  SerializableKey {.protobuf2.} = object
+    scheme {.fieldNumber: 1, pint, required.}: uint64
+    bytes {.fieldNumber: 2.}: seq[byte]
+
+  SerializableProposal* {.protobuf2.} = object
+    nonce* {.fieldNumber: 1.}: seq[byte]
+    pubkey* {.fieldNumber: 2.}: seq[byte]
+    exchanges* {.fieldNumber: 3, required.}: string
+    ciphers* {.fieldNumber: 4, required.}: string
+    hashes* {.fieldNumber: 5, required.}: string
+
+  SerializableExchange* {.protobuf2.} = object
+    epubkey* {.fieldNumber: 1.}: seq[byte]
+    signature* {.fieldNumber: 2.}: seq[byte]
 
 template orError*(exp: untyped, err: untyped): untyped =
   (exp.mapErr do (_: auto) -> auto: err)
@@ -381,32 +398,20 @@ proc getRawBytes*(key: PrivateKey | PublicKey): CryptoResult[seq[byte]] =
     else:
       err(SchemeError)
 
-proc toBytes*(key: PrivateKey, data: var openarray[byte]): CryptoResult[int] =
-  ## Serialize private key ``key`` (using libp2p protobuf scheme) and store
+proc toBytes*(key: PrivateKey | PublicKey, data: var openarray[byte]): CryptoResult[int] =
+  ## Serialize key ``key`` (using libp2p protobuf scheme) and store
   ## it to ``data``.
   ##
-  ## Returns number of bytes (octets) needed to store private key ``key``.
-  var msg = initProtoBuffer()
-  msg.write(1, uint64(key.scheme))
-  msg.write(2, ? key.getRawBytes())
-  msg.finish()
-  var blen = len(msg.buffer)
+  ## Returns number of bytes (octets) needed to store key ``key``.
+  var buffer: seq[byte] = Protobuf.encode(
+    SerializableKey(
+      scheme: uint64(key.scheme),
+      bytes: @ ? key.getRawBytes()
+    )
+  )
+  var blen = len(buffer)
   if len(data) >= blen:
-    copyMem(addr data[0], addr msg.buffer[0], blen)
-  ok(blen)
-
-proc toBytes*(key: PublicKey, data: var openarray[byte]): CryptoResult[int] =
-  ## Serialize public key ``key`` (using libp2p protobuf scheme) and store
-  ## it to ``data``.
-  ##
-  ## Returns number of bytes (octets) needed to store public key ``key``.
-  var msg = initProtoBuffer()
-  msg.write(1, uint64(key.scheme))
-  msg.write(2, ? key.getRawBytes())
-  msg.finish()
-  var blen = len(msg.buffer)
-  if len(data) >= blen and blen > 0:
-    copyMem(addr data[0], addr msg.buffer[0], blen)
+    copyMem(addr data[0], addr buffer[0], blen)
   ok(blen)
 
 proc toBytes*(sig: Signature, data: var openarray[byte]): int =
@@ -417,89 +422,95 @@ proc toBytes*(sig: Signature, data: var openarray[byte]): int =
   if len(data) >= result and result > 0:
     copyMem(addr data[0], unsafeAddr sig.data[0], len(sig.data))
 
-proc getBytes*(key: PrivateKey): CryptoResult[seq[byte]] =
-  ## Return private key ``key`` in binary form (using libp2p's protobuf
+proc getBytes*(key: PrivateKey | PublicKey): CryptoResult[seq[byte]] =
+  ## Return key ``key`` in binary form (using libp2p's protobuf
   ## serialization).
-  var msg = initProtoBuffer()
-  msg.write(1, uint64(key.scheme))
-  msg.write(2, ? key.getRawBytes())
-  msg.finish()
-  ok(msg.buffer)
-
-proc getBytes*(key: PublicKey): CryptoResult[seq[byte]] =
-  ## Return public key ``key`` in binary form (using libp2p's protobuf
-  ## serialization).
-  var msg = initProtoBuffer()
-  msg.write(1, uint64(key.scheme))
-  msg.write(2, ? key.getRawBytes())
-  msg.finish()
-  ok(msg.buffer)
+  ok(
+    Protobuf.encode(
+      SerializableKey(
+        scheme: uint64(key.scheme),
+        bytes: @ ? key.getRawBytes()
+      )
+    )
+  )
 
 proc getBytes*(sig: Signature): seq[byte] =
   ## Return signature ``sig`` in binary form.
   result = sig.data
 
-proc init*[T: PrivateKey|PublicKey](key: var T, data: openarray[byte]): bool =
+proc init*(key: var PrivateKey, data: openarray[byte]): bool =
   ## Initialize private key ``key`` from libp2p's protobuf serialized raw
   ## binary form.
   ##
   ## Returns ``true`` on success.
-  var id: uint64
-  var buffer: seq[byte]
-  if len(data) <= 0:
-    false
-  else:
-    var pb = initProtoBuffer(@data)
-    let r1 = pb.getField(1, id)
-    let r2 = pb.getField(2, buffer)
-    if not(r1.isOk() and r1.get() and r2.isOk() and r2.get()):
-      false
-    else:
-      if cast[int8](id) notin SupportedSchemesInt or len(buffer) <= 0:
-        false
-      else:
-        var scheme = cast[PKScheme](cast[int8](id))
-        when key is PrivateKey:
-          var nkey = PrivateKey(scheme: scheme)
-        else:
-          var nkey = PublicKey(scheme: scheme)
-        case scheme:
-        of PKScheme.RSA:
-          when supported(PKScheme.RSA):
-            if init(nkey.rsakey, buffer).isOk:
-              key = nkey
-              true
-            else:
-              false
-          else:
-            false
-        of PKScheme.Ed25519:
-          when supported(PKScheme.Ed25519):
-            if init(nkey.edkey, buffer):
-              key = nkey
-              true
-            else:
-              false
-          else:
-            false
-        of PKScheme.ECDSA:
-          when supported(PKScheme.ECDSA):
-            if init(nkey.eckey, buffer).isOk:
-              key = nkey
-              true
-            else:
-              false
-          else:
-            false
-        of PKScheme.Secp256k1:
-          when supported(PKScheme.Secp256k1):
-            if init(nkey.skkey, buffer).isOk:
-              key = nkey
-              true
-            else:
-              false
-          else:
-            false
+  try:
+    var pbKey = Protobuf.decode(data, SerializableKey)
+    if cast[int8](pbKey.scheme) notin SupportedSchemesInt:
+      return false
+
+    var scheme = cast[PKScheme](cast[int8](pbKey.scheme))
+    var nkey = PrivateKey(scheme: scheme)
+
+    case scheme:
+    of PKScheme.RSA:
+      when supported(PKScheme.RSA):
+        if init(nkey.rsakey, pbKey.bytes).isOk:
+          key = nkey
+          result = true
+    of PKScheme.Ed25519:
+      when supported(PKScheme.Ed25519):
+        if init(nkey.edkey, pbKey.bytes):
+          key = nkey
+          result = true
+    of PKScheme.ECDSA:
+      when supported(PKScheme.ECDSA):
+        if init(nkey.eckey, pbKey.bytes).isOk:
+          key = nkey
+          result = true
+    of PKScheme.Secp256k1:
+      when supported(PKScheme.Secp256k1):
+        if init(nkey.skkey, pbKey.bytes).isOk:
+          key = nkey
+          result = true
+  except ProtobufReadError:
+    discard
+
+proc init*(key: var PublicKey, data: openarray[byte]): bool =
+  ## Initialize public key ``key`` from libp2p's protobuf serialized raw
+  ## binary form.
+  ##
+  ## Returns ``true`` on success.
+  try:
+    var pbKey = Protobuf.decode(data, SerializableKey)
+    if cast[int8](pbKey.scheme) notin SupportedSchemesInt:
+      return false
+
+    var scheme = cast[PKScheme](cast[int8](pbKey.scheme))
+    var nkey = PublicKey(scheme: scheme)
+
+    case scheme:
+    of PKScheme.RSA:
+      when supported(PKScheme.RSA):
+        if init(nkey.rsakey, pbKey.bytes).isOk:
+          key = nkey
+          result = true
+    of PKScheme.Ed25519:
+      when supported(PKScheme.Ed25519):
+        if init(nkey.edkey, pbKey.bytes):
+          key = nkey
+          result = true
+    of PKScheme.ECDSA:
+      when supported(PKScheme.ECDSA):
+        if init(nkey.eckey, pbKey.bytes).isOk:
+          key = nkey
+          result = true
+    of PKScheme.Secp256k1:
+      when supported(PKScheme.Secp256k1):
+        if init(nkey.skkey, pbKey.bytes).isOk:
+          key = nkey
+          result = true
+  except ProtobufReadError:
+    discard
 
 proc init*(sig: var Signature, data: openarray[byte]): bool =
   ## Initialize signature ``sig`` from raw binary form.
@@ -948,53 +959,21 @@ proc createProposal*(nonce, pubkey: openarray[byte],
   ## ``pubkey``, comma-delimieted list of supported exchange schemes
   ## ``exchanges``, comma-delimeted list of supported ciphers ``ciphers`` and
   ## comma-delimeted list of supported hashes ``hashes``.
-  var msg = initProtoBuffer({WithUint32BeLength})
-  msg.write(1, nonce)
-  msg.write(2, pubkey)
-  msg.write(3, exchanges)
-  msg.write(4, ciphers)
-  msg.write(5, hashes)
-  msg.finish()
-  msg.buffer
-
-proc decodeProposal*(message: seq[byte], nonce, pubkey: var seq[byte],
-                     exchanges, ciphers, hashes: var string): bool =
-  ## Parse incoming proposal message and decode remote random nonce ``nonce``,
-  ## remote public key ``pubkey``, comma-delimieted list of supported exchange
-  ## schemes ``exchanges``, comma-delimeted list of supported ciphers
-  ## ``ciphers`` and comma-delimeted list of supported hashes ``hashes``.
-  ##
-  ## Procedure returns ``true`` on success and ``false`` on error.
-  var pb = initProtoBuffer(message)
-  let r1 = pb.getField(1, nonce)
-  let r2 = pb.getField(2, pubkey)
-  let r3 = pb.getField(3, exchanges)
-  let r4 = pb.getField(4, ciphers)
-  let r5 = pb.getField(5, hashes)
-
-  r1.isOk() and r1.get() and r2.isOk() and r2.get() and
-  r3.isOk() and r3.get() and r4.isOk() and r4.get() and
-  r5.isOk() and r5.get()
+  Protobuf.encode(SerializableProposal(
+    nonce: @nonce,
+    pubkey: @pubkey,
+    exchanges: exchanges,
+    ciphers: ciphers,
+    hashes: hashes
+  ), {UIntBELengthPrefix})
 
 proc createExchange*(epubkey, signature: openarray[byte]): seq[byte] =
   ## Create SecIO exchange message using ephemeral public key ``epubkey`` and
   ## signature of proposal blocks ``signature``.
-  var msg = initProtoBuffer({WithUint32BeLength})
-  msg.write(1, epubkey)
-  msg.write(2, signature)
-  msg.finish()
-  msg.buffer
-
-proc decodeExchange*(message: seq[byte],
-                     pubkey, signature: var seq[byte]): bool =
-  ## Parse incoming exchange message and decode remote ephemeral public key
-  ## ``pubkey`` and signature ``signature``.
-  ##
-  ## Procedure returns ``true`` on success and ``false`` on error.
-  var pb = initProtoBuffer(message)
-  let r1 = pb.getField(1, pubkey)
-  let r2 = pb.getField(2, signature)
-  r1.isOk() and r1.get() and r2.isOk() and r2.get()
+  Protobuf.encode(SerializableExchange(
+    epubkey: @epubkey,
+    signature: @signature
+  ), {UIntBELengthPrefix})
 
 ## Serialization/Deserialization helpers
 
@@ -1012,81 +991,3 @@ proc write*(vb: var VBuffer, sig: PrivateKey) {.
      inline, raises: [Defect, ResultError[CryptoError]].} =
   ## Write Signature value ``sig`` to buffer ``vb``.
   vb.writeSeq(sig.getBytes().tryGet())
-
-proc write*[T: PublicKey|PrivateKey](pb: var ProtoBuffer, field: int,
-                                     key: T) {.
-     inline, raises: [Defect, ResultError[CryptoError]].} =
-  write(pb, field, key.getBytes().tryGet())
-
-proc write*(pb: var ProtoBuffer, field: int, sig: Signature) {.
-     inline, raises: [Defect, ResultError[CryptoError]].} =
-  write(pb, field, sig.getBytes())
-
-proc initProtoField*(index: int, key: PublicKey|PrivateKey): ProtoField {.
-     deprecated, raises: [Defect, ResultError[CryptoError]].} =
-  ## Initialize ProtoField with PublicKey/PrivateKey ``key``.
-  result = initProtoField(index, key.getBytes().tryGet())
-
-proc initProtoField*(index: int, sig: Signature): ProtoField {.deprecated.} =
-  ## Initialize ProtoField with Signature ``sig``.
-  result = initProtoField(index, sig.getBytes())
-
-proc getValue*[T: PublicKey|PrivateKey](data: var ProtoBuffer, field: int,
-                                        value: var T): int {.deprecated.} =
-  ## Read PublicKey/PrivateKey from ProtoBuf's message and validate it.
-  var buf: seq[byte]
-  var key: PublicKey
-  result = getLengthValue(data, field, buf)
-  if result > 0:
-    if not key.init(buf):
-      result = -1
-    else:
-      value = key
-
-proc getValue*(data: var ProtoBuffer, field: int, value: var Signature): int {.
-     deprecated.} =
-  ## Read ``Signature`` from ProtoBuf's message and validate it.
-  var buf: seq[byte]
-  var sig: Signature
-  result = getLengthValue(data, field, buf)
-  if result > 0:
-    if not sig.init(buf):
-      result = -1
-    else:
-      value = sig
-
-proc getField*[T: PublicKey|PrivateKey](pb: ProtoBuffer, field: int,
-                                        value: var T): ProtoResult[bool] =
-  ## Deserialize public/private key from protobuf's message ``pb`` using field
-  ## index ``field``.
-  ##
-  ## On success deserialized key will be stored in ``value``.
-  var buffer: seq[byte]
-  var key: T
-  let res = ? pb.getField(field, buffer)
-  if not(res):
-    ok(false)
-  else:
-    if key.init(buffer):
-      value = key
-      ok(true)
-    else:
-      err(ProtoError.IncorrectBlob)
-
-proc getField*(pb: ProtoBuffer, field: int,
-               value: var Signature): ProtoResult[bool] =
-  ## Deserialize signature from protobuf's message ``pb`` using field index
-  ## ``field``.
-  ##
-  ## On success deserialized signature will be stored in ``value``.
-  var buffer: seq[byte]
-  var sig: Signature
-  let res = ? pb.getField(field, buffer)
-  if not(res):
-    ok(false)
-  else:
-    if sig.init(buffer):
-      value = sig
-      ok(true)
-    else:
-      err(ProtoError.IncorrectBlob)

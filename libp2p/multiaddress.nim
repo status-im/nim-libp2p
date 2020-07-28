@@ -14,10 +14,9 @@
 import nativesockets
 import tables, strutils, stew/shims/net
 import chronos
-import multicodec, multihash, multibase, transcoder, vbuffer, peerid,
-       protobuf/minprotobuf
+import multicodec, multihash, multibase, transcoder, vbuffer, peerid
 import stew/[base58, base32, endians2, results]
-export results, minprotobuf, vbuffer
+export results, vbuffer
 
 type
   MAKind* = enum
@@ -1020,39 +1019,3 @@ proc `$`*(pat: MaPattern): string =
     result = "(" & sub.join("|") & ")"
   elif pat.operator == Eq:
     result = $pat.value
-
-proc write*(pb: var ProtoBuffer, field: int, value: MultiAddress) {.inline.} =
-  write(pb, field, value.data.buffer)
-
-proc getField*(pb: var ProtoBuffer, field: int,
-               value: var MultiAddress): ProtoResult[bool] {.
-     inline.} =
-  var buffer: seq[byte]
-  let res = ? pb.getField(field, buffer)
-  if not(res):
-    ok(false)
-  else:
-    let ma = MultiAddress.init(buffer)
-    if ma.isOk():
-      value = ma.get()
-      ok(true)
-    else:
-      err(ProtoError.IncorrectBlob)
-
-proc getRepeatedField*(pb: var ProtoBuffer, field: int,
-                       value: var seq[MultiAddress]): ProtoResult[bool] {.
-     inline.} =
-  var items: seq[seq[byte]]
-  value.setLen(0)
-  let res = ? pb.getRepeatedField(field, items)
-  if not(res):
-    ok(false)
-  else:
-    for item in items:
-      let ma = MultiAddress.init(item)
-      if ma.isOk():
-        value.add(ma.get())
-      else:
-        value.setLen(0)
-        return err(ProtoError.IncorrectBlob)
-    ok(true)

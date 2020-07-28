@@ -12,10 +12,10 @@ import chronicles
 import bearssl
 import stew/[endians2, byteutils]
 import nimcrypto/[utils, sha2, hmac]
+import protobuf_serialization
 import ../../stream/[connection, streamseq]
 import ../../peerid
 import ../../peerinfo
-import ../../protobuf/minprotobuf
 import ../../utility
 import secure,
        ../../crypto/[crypto, chacha20poly1305, curve25519, hkdf]
@@ -83,6 +83,10 @@ type
   NoiseDecryptTagError* = object of CatchableError
   NoiseOversizedPayloadError* = object of CatchableError
   NoiseNonceMaxError* = object of CatchableError # drop connection on purpose
+
+  SerializableHandshake {.protobuf2.} = object
+    key {.fieldNumber: 1.}: seq[byte]
+    payload {.fieldNumber: 2.}: seq[byte]
 
 # Utility
 
@@ -428,37 +432,35 @@ method handshake*(p: Noise, conn: Connection, initiator: bool): Future[SecureCon
     signedPayload = p.localPrivateKey.sign(
       PayloadString.toBytes & p.noiseKeys.publicKey.getBytes).tryGet()
 
+
   var
-    libp2pProof = initProtoBuffer()
-  libp2pProof.write(1, p.localPublicKey)
-  libp2pProof.write(2, signedPayload.getBytes())
-  # data field also there but not used!
-  libp2pProof.finish()
+    libp2pProof = Protobuf.encode(
+      SerializableHandshake(
+        key: p.localPublicKey,
+        payload: signedPayload.getBytes()
+      )
+    )
 
   var handshakeRes =
     if initiator:
-      await handshakeXXOutbound(p, conn, libp2pProof.buffer)
+      await handshakeXXOutbound(p, conn, libp2pProof)
     else:
-      await handshakeXXInbound(p, conn, libp2pProof.buffer)
+      await handshakeXXInbound(p, conn, libp2pProof)
 
   var secure = try:
     var
-      remoteProof = initProtoBuffer(handshakeRes.remoteP2psecret)
+      remoteProof: SerializableExchange
       remotePubKey: PublicKey
-      remotePubKeyBytes: seq[byte]
       remoteSig: Signature
-      remoteSigBytes: seq[byte]
 
-    let r1 = remoteProof.getField(1, remotePubKeyBytes)
-    let r2 = remoteProof.getField(2, remoteSigBytes)
-    if r1.isErr() or not(r1.get()):
-      raise newException(NoiseHandshakeError, "Failed to deserialize remote public key bytes. (initiator: " & $initiator & ", peer: " & $conn.peerInfo.peerId & ")")
-    if r2.isErr() or not(r2.get()):
-      raise newException(NoiseHandshakeError, "Failed to deserialize remote signature bytes. (initiator: " & $initiator & ", peer: " & $conn.peerInfo.peerId & ")")
+    try:
+      remoteProof = Protobuf.decode(handshakeRes.remoteP2psecret, SerializableExchange)
+    except ProtobufReadError:
+      raise newException(NoiseHandshakeError, "Failed to deserialize remote public key/signature bytes. (initiator: " & $initiator & ", peer: " & $conn.peerInfo.peerId & ")")
 
-    if not remotePubKey.init(remotePubKeyBytes):
+    if not remotePubKey.init(remoteProof.epubkey):
       raise newException(NoiseHandshakeError, "Failed to decode remote public key. (initiator: " & $initiator & ", peer: " & $conn.peerInfo.peerId & ")")
-    if not remoteSig.init(remoteSigBytes):
+    if not remoteSig.init(remoteProof.signature):
       raise newException(NoiseHandshakeError, "Failed to decode remote signature. (initiator: " & $initiator & ", peer: " & $conn.peerInfo.peerId & ")")
 
     let verifyPayload = PayloadString.toBytes & handshakeRes.rs.getBytes

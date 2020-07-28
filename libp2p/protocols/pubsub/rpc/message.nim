@@ -9,12 +9,11 @@
 
 {.push raises: [Defect].}
 
-import chronicles, metrics, stew/[byteutils, endians2]
-import ./messages, ./protobuf,
+import chronicles, metrics, stew/[byteutils, endians2], protobuf_serialization
+import ./messages,
        ../../../peerid,
        ../../../peerinfo,
-       ../../../crypto/crypto,
-       ../../../protobuf/minprotobuf
+       ../../../crypto/crypto
 
 export messages
 
@@ -27,10 +26,10 @@ declareCounter(libp2p_pubsub_sig_verify_success, "pubsub successfully validated 
 declareCounter(libp2p_pubsub_sig_verify_failure, "pubsub failed validated messages")
 
 func defaultMsgIdProvider*(m: Message): string =
-  byteutils.toHex(m.seqno) & m.fromPeer.pretty
+  byteutils.toHex(m.seqno) & PeerID(data: m.fromPeer).pretty
 
 proc sign*(msg: Message, p: PeerInfo): CryptoResult[seq[byte]] =
-  ok((? p.privateKey.sign(PubSubPrefix & encodeMessage(msg))).getBytes())
+  ok((? p.privateKey.sign(PubSubPrefix & Protobuf.encode(msg))).getBytes())
 
 proc verify*(m: Message, p: PeerInfo): bool =
   if m.signature.len > 0 and m.key.len > 0:
@@ -42,7 +41,7 @@ proc verify*(m: Message, p: PeerInfo): bool =
     var key: PublicKey
     if remote.init(m.signature) and key.init(m.key):
       trace "verifying signature", remoteSignature = remote
-      result = remote.verify(PubSubPrefix & encodeMessage(msg), key)
+      result = remote.verify(PubSubPrefix & Protobuf.encode(msg), key)
 
   if result:
     libp2p_pubsub_sig_verify_success.inc()
@@ -57,7 +56,7 @@ proc init*(
     seqno: uint64,
     sign: bool = true): Message {.gcsafe, raises: [CatchableError, Defect].} =
   result = Message(
-    fromPeer: p.peerId,
+    fromPeer: p.peerId.data,
     data: data,
     seqno: @(seqno.toBytesBE), # unefficient, fine for now
     topicIDs: @[topic])

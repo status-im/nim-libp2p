@@ -89,7 +89,7 @@ method rpcHandler*(f: FloodSub,
               for h in f.topics[t].handler:
                 trace "calling handler for message", topicId = t,
                                                      localPeer = f.peerInfo.id,
-                                                     fromPeer = msg.fromPeer.pretty
+                                                     fromPeer = PeerID(data: msg.fromPeer).pretty
 
                 try:
                   await h(t, msg.data)                 # trigger user provided handler

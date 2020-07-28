@@ -14,7 +14,7 @@
 import hashes
 import nimcrypto/utils, stew/base58
 import crypto/crypto, multicodec, multihash, vbuffer
-import protobuf/minprotobuf
+import protobuf_serialization
 import stew/results
 export results
 
@@ -24,14 +24,14 @@ const
 # TODO: add proper on disc serialization
 # using peer-id protobuf format
 type
-  PeerID* = object
-    data*: seq[byte]
+  PeerID* {.protobuf2.} = object
+    data* {.fieldNumber: 1.}: seq[byte]
 
   PeerIDError* = object of CatchableError
 
 proc pretty*(pid: PeerID): string {.inline.} =
   ## Return base58 encoded ``pid`` representation.
-  result = Base58.encode(pid.data)
+  result = base58.encode(Base58, pid.data)
 
 proc toBytes*(pid: PeerID, data: var openarray[byte]): int =
   ## Store PeerID ``pid`` to array of bytes ``data``.
@@ -199,37 +199,3 @@ proc match*(pid: PeerID, seckey: PrivateKey): bool {.inline.} =
 proc write*(vb: var VBuffer, pid: PeerID) {.inline.} =
   ## Write PeerID value ``peerid`` to buffer ``vb``.
   vb.writeSeq(pid.data)
-
-proc initProtoField*(index: int, pid: PeerID): ProtoField {.deprecated.} =
-  ## Initialize ProtoField with PeerID ``value``.
-  result = initProtoField(index, pid.data)
-
-proc getValue*(data: var ProtoBuffer, field: int, value: var PeerID): int {.
-     deprecated.} =
-  ## Read ``PeerID`` from ProtoBuf's message and validate it.
-  var pid: PeerID
-  result = getLengthValue(data, field, pid.data)
-  if result > 0:
-    if not pid.validate():
-      result = -1
-    else:
-      value = pid
-
-proc write*(pb: var ProtoBuffer, field: int, pid: PeerID) =
-  ## Write PeerID value ``peerid`` to object ``pb`` using ProtoBuf's encoding.
-  write(pb, field, pid.data)
-
-proc getField*(pb: ProtoBuffer, field: int,
-               pid: var PeerID): ProtoResult[bool] {.inline.} =
-  ## Read ``PeerID`` from ProtoBuf's message and validate it
-  var buffer: seq[byte]
-  let res = ? pb.getField(field, buffer)
-  if not(res):
-    ok(false)
-  else:
-    var peerId: PeerID
-    if peerId.init(buffer):
-      pid = peerId
-      ok(true)
-    else:
-      err(ProtoError.IncorrectBlob)

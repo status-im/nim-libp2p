@@ -192,7 +192,7 @@ proc getGossipPeers(g: GossipSub): Table[string, ControlMessage] {.gcsafe.} =
     if mids.len <= 0:
       continue
 
-    let ihave = ControlIHave(topicID: topic,
+    let ihave = ControlIHave(topicID: pbSome(type(ControlIHave.topicID), topic),
                               messageIDs: toSeq(mids))
 
     if topic notin g.gossipsub:
@@ -354,9 +354,9 @@ proc handleIHave(g: GossipSub,
                  ihaves: seq[ControlIHave]): ControlIWant =
   for ihave in ihaves:
     trace "peer sent ihave",
-      peer = peer.id, topic = ihave.topicID, msgs = ihave.messageIDs
+      peer = peer.id, topic = ihave.topicID.get(), msgs = ihave.messageIDs
 
-    if ihave.topicID in g.mesh:
+    if ihave.topicID.get() in g.mesh:
       for m in ihave.messageIDs:
         if m notin g.seen:
           result.messageIDs.add(m)
@@ -400,7 +400,7 @@ method rpcHandler*(g: GossipSub,
           continue
 
         # this shouldn't happen
-        if g.peerInfo.peerId == msg.fromPeer:
+        if g.peerInfo.peerId.data == msg.fromPeer:
           trace "skipping messages from self"
           continue
 
@@ -415,7 +415,7 @@ method rpcHandler*(g: GossipSub,
             for h in g.topics[t].handler:
               trace "calling handler for message", topicId = t,
                                                    localPeer = g.peerInfo.id,
-                                                   fromPeer = msg.fromPeer.pretty
+                                                   fromPeer = PeerID(data: msg.fromPeer).pretty
               try:
                 await h(t, msg.data)                 # trigger user provided handler
               except CatchableError as exc:

@@ -8,9 +8,8 @@
 ## those terms.
 
 import options
-import chronos, chronicles
-import ../protobuf/minprotobuf,
-       ../peerinfo,
+import chronos, chronicles, protobuf_serialization
+import ../peerinfo,
        ../stream/connection,
        ../peerid,
        ../crypto/crypto,
@@ -44,58 +43,26 @@ type
   Identify* = ref object of LPProtocol
     peerInfo*: PeerInfo
 
-proc encodeMsg*(peerInfo: PeerInfo, observedAddr: Multiaddress): ProtoBuffer =
-  result = initProtoBuffer()
-  result.write(1, peerInfo.publicKey.get().getBytes().tryGet())
-  for ma in peerInfo.addrs:
-    result.write(2, ma.data.buffer)
-  for proto in peerInfo.protocols:
-    result.write(3, proto)
-  result.write(4, observedAddr.data.buffer)
-  let protoVersion = ProtoVersion
-  result.write(5, protoVersion)
-  let agentVersion = AgentVersion
-  result.write(6, agentVersion)
-  result.finish()
+  SerializableIdentifyInfo {.protobuf2.} = object
+    pubKey {.fieldNumber: 1.}: seq[byte]
+    addresses {.fieldNumber: 2.}: seq[seq[byte]]
+    protocols {.fieldNumber: 3.}: seq[string]
+    observedAddrs {.fieldNumber: 4.}: seq[byte]
+    version {.fieldNumber: 5, required.}: string
+    agent {.fieldNumber: 6, required.}: string
 
-proc decodeMsg*(buf: seq[byte]): Option[IdentifyInfo] =
-  var
-    iinfo: IdentifyInfo
-    pubKey: PublicKey
-    oaddr: MultiAddress
-    protoVersion: string
-    agentVersion: string
-
-  var pb = initProtoBuffer(buf)
-
-  let r1 = pb.getField(1, pubKey)
-  let r2 = pb.getRepeatedField(2, iinfo.addrs)
-  let r3 = pb.getRepeatedField(3, iinfo.protos)
-  let r4 = pb.getField(4, oaddr)
-  let r5 = pb.getField(5, protoVersion)
-  let r6 = pb.getField(6, agentVersion)
-
-  let res = r1.isOk() and r2.isOk() and r3.isOk() and
-            r4.isOk() and r5.isOk() and r6.isOk()
-
-  if res:
-    if r1.get():
-      iinfo.pubKey = some(pubKey)
-    if r4.get():
-      iinfo.observedAddr = some(oaddr)
-    if r5.get():
-      iinfo.protoVersion = some(protoVersion)
-    if r6.get():
-      iinfo.agentVersion = some(agentVersion)
-    trace "decodeMsg: decoded message", pubkey = ($pubKey).shortLog,
-          addresses = $iinfo.addrs, protocols = $iinfo.protos,
-          observable_address = $iinfo.observedAddr,
-          proto_version = $iinfo.protoVersion,
-          agent_version = $iinfo.agentVersion
-    some(iinfo)
-  else:
-    trace "decodeMsg: failed to decode received message"
-    none[IdentifyInfo]()
+proc encodeMsg*(peerInfo: PeerInfo, observedAddrs: Multiaddress): seq[byte] =
+  var byteAddrs = newSeq[seq[byte]](peerInfo.addrs.len)
+  for a in 0 ..< byteAddrs.len:
+    byteAddrs[a] = peerInfo.addrs[a].data.buffer
+  Protobuf.encode(SerializableIdentifyInfo(
+    pubKey: peerInfo.publicKey.get().getBytes().tryGet(),
+    addresses: byteAddrs,
+    protocols: peerInfo.protocols,
+    observedAddrs: observedAddrs.data.buffer,
+    version: ProtoVersion,
+    agent: AgentVersion
+  ))
 
 proc newIdentify*(peerInfo: PeerInfo): Identify =
   new result
@@ -111,7 +78,7 @@ method init*(p: Identify) =
 
       trace "handling identify request", oid = conn.oid
       var pb = encodeMsg(p.peerInfo, conn.observedAddr)
-      await conn.writeLp(pb.buffer)
+      await conn.writeLp(pb)
     except CancelledError as exc:
       raise exc
     except CatchableError as exc:
@@ -129,10 +96,34 @@ proc identify*(p: Identify,
     trace "identify: Empty message received!"
     raise newException(IdentityInvalidMsgError, "Empty message received!")
 
-  let infoOpt = decodeMsg(message)
-  if infoOpt.isNone():
+  try:
+    let temp = Protobuf.decode(message, SerializableIdentifyInfo)
+    if temp.pubKey.len > 0:
+      var potentialPubKey: PublicKey
+      if potentialPubKey.init(temp.pubKey):
+        result.pubKey = some(potentialPubKey)
+
+    for mAddr in temp.addresses:
+      var ma = MultiAddress.init(mAddr)
+      if ma.isOk():
+        result.addrs.add(ma.get())
+      else:
+        raise newException(IdentityInvalidMsgError, "Incorrect message received!")
+
+    if temp.observedAddrs.len > 0:
+      var ma = MultiAddress.init(temp.observedAddrs)
+      if ma.isOk():
+        result.observedAddr = some(ma.get())
+      else:
+        raise newException(IdentityInvalidMsgError, "Incorrect message received!")
+
+    if temp.version.len > 0:
+      result.protoVersion = some(temp.version)
+    if temp.agent.len > 0:
+      result.agentVersion = some(temp.version)
+    result.protos = temp.protocols
+  except ProtobufReadError:
     raise newException(IdentityInvalidMsgError, "Incorrect message received!")
-  result = infoOpt.get()
 
   if not isNil(remotePeerInfo) and result.pubKey.isSome:
     let peer = PeerID.init(result.pubKey.get())
@@ -152,4 +143,4 @@ proc identify*(p: Identify,
 proc push*(p: Identify, conn: Connection) {.async.} =
   await conn.write(IdentifyPushCodec)
   var pb = encodeMsg(p.peerInfo, conn.observedAddr)
-  await conn.writeLp(pb.buffer)
+  await conn.writeLp(pb)

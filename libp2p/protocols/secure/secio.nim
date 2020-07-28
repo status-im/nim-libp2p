@@ -6,7 +6,7 @@
 ## at your option.
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
-import chronos, chronicles, oids, stew/endians2, bearssl
+import chronos, chronicles, oids, stew/endians2, bearssl, protobuf_serialization
 import nimcrypto/[hmac, sha2, sha, hash, rijndael, twofish, bcmode]
 import secure,
        ../../stream/connection,
@@ -311,8 +311,14 @@ method handshake*(s: Secio, conn: Connection, initiator: bool = false): Future[S
     trace "Proposal exchange failed", conn = $conn
     raise (ref SecioError)(msg: "Proposal exchange failed")
 
-  if not decodeProposal(answer, remoteNonce, remoteBytesPubkey, remoteExchanges,
-                        remoteCiphers, remoteHashes):
+  try:
+    var proposal = Protobuf.decode(answer, SerializableProposal)
+    remoteNonce = proposal.nonce
+    remoteBytesPubkey = proposal.pubkey
+    remoteExchanges = proposal.exchanges
+    remoteCiphers = proposal.ciphers
+    remoteHashes = proposal.hashes
+  except ProtobufReadError:
     trace "Remote proposal decoding failed", conn = $conn
     raise (ref SecioError)(msg: "Remote proposal decoding failed")
 
@@ -353,7 +359,11 @@ method handshake*(s: Secio, conn: Connection, initiator: bool = false): Future[S
     trace "Corpus exchange failed", conn = $conn
     raise (ref SecioError)(msg: "Corpus exchange failed")
 
-  if not decodeExchange(remoteExchange, remoteEBytesPubkey, remoteEBytesSig):
+  try:
+    var exchange = Protobuf.decode(remoteExchange, SerializableExchange)
+    remoteEBytesPubkey = exchange.epubkey
+    remoteEBytesSig = exchange.signature
+  except ProtobufReadError:
     trace "Remote exchange decoding failed", conn = $conn
     raise (ref SecioError)(msg: "Remote exchange decoding failed")
 
