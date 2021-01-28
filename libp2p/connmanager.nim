@@ -25,7 +25,7 @@ const
   MaxConnectionsPerPeer* = 5
 
 type
-  TooManyConnectionsError* = object of CatchableError
+  TooManyConnectionsError* = object of LPError
 
   ConnProvider* = proc(): Future[Connection] {.gcsafe, closure.}
 

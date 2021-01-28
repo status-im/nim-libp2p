@@ -55,7 +55,7 @@ const
   ConcurrentUpgrades* = 4
 
 type
-    DialFailedError* = object of CatchableError
+    DialFailedError* = object of LPError
 
     Switch* = ref object of RootObj
       peerInfo*: PeerInfo

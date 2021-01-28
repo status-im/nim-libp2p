@@ -15,7 +15,7 @@ import nativesockets, hashes
 import tables, strutils, stew/shims/net
 import chronos
 import multicodec, multihash, multibase, transcoder, vbuffer, peerid,
-       protobuf/minprotobuf
+       protobuf/minprotobuf, errors
 import stew/[base58, base32, endians2, results]
 export results, minprotobuf, vbuffer
 
@@ -46,7 +46,7 @@ type
 
   MaResult*[T] = Result[T, string]
 
-  MaError* = object of CatchableError
+  MaError* = object of LPError
   MaInvalidAddress* = object of MaError
 
   IpTransportProtocol* = enum

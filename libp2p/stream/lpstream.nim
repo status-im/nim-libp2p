@@ -12,7 +12,10 @@ import stew/byteutils
 import chronicles, chronos, metrics
 import ../varint,
        ../peerinfo,
-       ../multiaddress
+       ../multiaddress,
+       ../errors
+
+export errors
 
 declareGauge(libp2p_open_streams,
   "open stream instances", labels = ["type", "dir"])
@@ -39,7 +42,7 @@ type
     dir*: Direction
     closedWithEOF: bool # prevent concurrent calls
 
-  LPStreamError* = object of CatchableError
+  LPStreamError* = object of LPError
   LPStreamIncompleteError* = object of LPStreamError
   LPStreamIncorrectDefect* = object of Defect
   LPStreamLimitError* = object of LPStreamError

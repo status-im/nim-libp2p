@@ -18,7 +18,8 @@ logScope:
   topics = "libp2p transport"
 
 type
-  TransportClosedError* = object of CatchableError
+  TransportError* = object of LPError
+  TransportClosedError* = object of TransportError
 
   Transport* = ref object of RootObj
     ma*: Multiaddress

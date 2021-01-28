@@ -11,7 +11,7 @@
 import std/[os, osproc, strutils, tables, strtabs]
 import chronos, chronicles
 import ../varint, ../multiaddress, ../multicodec, ../cid, ../peerid
-import ../wire, ../multihash, ../protobuf/minprotobuf
+import ../wire, ../multihash, ../protobuf/minprotobuf, ../errors
 import ../crypto/crypto
 
 export peerid, multiaddress, multicodec, multihash, cid, crypto, wire
@@ -152,8 +152,9 @@ type
                             ticket: PubsubTicket,
                             message: PubSubMessage): Future[bool] {.gcsafe.}
 
-  DaemonRemoteError* = object of CatchableError
-  DaemonLocalError* = object of CatchableError
+  DaemonError* = object of LPError
+  DaemonRemoteError* = object of DaemonError
+  DaemonLocalError* = object of DaemonError
 
 var daemonsCount {.threadvar.}: int
 

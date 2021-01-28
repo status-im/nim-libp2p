@@ -32,7 +32,7 @@ type
     msgType: MessageType
     data: seq[byte]
 
-  InvalidMplexMsgType = object of CatchableError
+  InvalidMplexMsgType = object of MuxerError
 
 # https://github.com/libp2p/specs/tree/master/mplex#writing-to-a-stream
 const MaxMsgSize* = 1 shl 20 # 1mb

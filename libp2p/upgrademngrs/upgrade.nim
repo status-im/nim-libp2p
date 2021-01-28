@@ -21,7 +21,7 @@ export connmanager, connection, identify, secure, multistream
 declarePublicCounter(libp2p_failed_upgrade, "peers failed upgrade")
 
 type
-  UpgradeFailedError* = object of CatchableError
+  UpgradeFailedError* = object of LPError
 
   Upgrade* = ref object of RootObj
     ms*: MultistreamSelect
