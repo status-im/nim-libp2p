@@ -11,9 +11,10 @@ import std/[hashes, oids, strformat]
 import chronicles, chronos, metrics
 import lpstream,
        ../multiaddress,
-       ../peerinfo
+       ../peerinfo,
+       ../errors
 
-export lpstream, peerinfo
+export lpstream, peerinfo, errors
 
 logScope:
   topics = "libp2p connection"
