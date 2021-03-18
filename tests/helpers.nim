@@ -69,6 +69,20 @@ template asyncTest*(name: string, body: untyped): untyped =
         body
     )())
 
+template asyncCancelTest*(name: string, body: untyped): untyped =
+  test name:
+    var counter = 0
+    while true:
+      let res = waitFor((
+        proc(n: int): Future[bool] {.async, gcsafe.} =
+          var testIteration {.inject.} = n
+          checkTrackers()
+          body
+      )(counter))
+      if res:
+        break
+      inc(counter)
+
 type RngWrap = object
   rng: ref BrHmacDrbgContext
 

@@ -304,6 +304,8 @@ proc upgradeMonitor(conn: Connection, upgrades: AsyncSemaphore) {.async.} =
     libp2p_failed_upgrades_incoming.inc()
     if not isNil(conn):
       await conn.close()
+    if exc of CancelledError:
+      raise
 
     trace "Exception awaiting connection upgrade", exc = exc.msg, conn
   finally:
@@ -346,9 +348,12 @@ proc accept(s: Switch, transport: Transport) {.async.} = # noraises
       debug "Accepted an incoming connection", conn
       asyncSpawn upgradeMonitor(conn, upgrades)
       asyncSpawn s.upgrade.upgradeIncoming(conn)
-    except CancelledError as exc:
+    except CancelledError:
       trace "releasing semaphore on cancellation"
       upgrades.release() # always release the slot
+      if not isNil(conn):
+        await conn.close()
+      raise
     except CatchableError as exc:
       debug "Exception in accept loop, exiting", exc = exc.msg
       upgrades.release() # always release the slot
@@ -379,8 +384,7 @@ proc stop*(s: Switch) {.async.} =
   for t in s.transports:
     try:
       await t.stop()
-    except CancelledError as exc:
-      raise exc
+    # don't pass cancellation at this point
     except CatchableError as exc:
       warn "error cleaning up transports", msg = exc.msg
 

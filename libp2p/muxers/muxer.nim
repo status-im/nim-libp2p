@@ -67,9 +67,9 @@ method init(c: MuxerProvider) =
       if not isNil(c.muxerHandler):
         futs &= c.muxerHandler(muxer)
 
-      checkFutures(await allFinished(futs))
-    except CancelledError as exc:
-      raise exc
+      await allFuturesThrowing(futs)
+    except CancelledError:
+      raise
     except CatchableError as exc:
       trace "exception in muxer handler", exc = exc.msg, conn, proto
     finally:

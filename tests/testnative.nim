@@ -25,3 +25,5 @@ import testtransport,
        testnoise,
        testpeerinfo,
        testmplex
+
+import testcancel

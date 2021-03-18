@@ -59,6 +59,8 @@ proc mux*(u: MuxedUpgrade, conn: Connection): Future[Muxer] {.async, gcsafe.} =
 
   try:
     await u.identify(muxer)
+  except CancelledError:
+    raise
   except CatchableError as exc:
     # Identify is non-essential, though if it fails, it might indicate that
     # the connection was closed already - this will be picked up by the read
@@ -121,7 +123,10 @@ method upgradeIncoming*(u: MuxedUpgrade, incomingConn: Connection) {.async, gcsa
     except CatchableError as exc:
       debug "Exception in secure handler during incoming upgrade", msg = exc.msg, conn
       if not cconn.isUpgraded:
-        cconn.upgrade(exc)
+        # signal failure
+        cconn.upgrade(failed = exc)
+      if exc of CancelledError:
+        raise
     finally:
       if not isNil(cconn):
         await cconn.close()
@@ -140,7 +145,10 @@ method upgradeIncoming*(u: MuxedUpgrade, incomingConn: Connection) {.async, gcsa
   except CatchableError as exc:
     debug "Exception upgrading incoming", exc = exc.msg
     if not incomingConn.isUpgraded:
-      incomingConn.upgrade(exc)
+      # signal failure
+      incomingConn.upgrade(failed = exc)
+    if exc of CancelledError:
+        raise
   finally:
     if not isNil(incomingConn):
       await incomingConn.close()
