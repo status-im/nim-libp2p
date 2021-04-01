@@ -6,13 +6,13 @@ const
 
 import random, tables
 import chronos
-import ../../libp2p/[standard_setup,
+import ../../libp2p/[builders,
                      protocols/pubsub/pubsub,
                      protocols/pubsub/gossipsub,
                      protocols/pubsub/floodsub,
                      protocols/secure/secure]
 
-export standard_setup
+export builders
 
 randomize()
 

@@ -7,7 +7,7 @@ import nimcrypto/sysrand
 import ../libp2p/[errors,
                   switch,
                   multistream,
-                  standard_setup,
+                  builders,
                   stream/bufferstream,
                   stream/connection,
                   multiaddress,

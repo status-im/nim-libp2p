@@ -31,6 +31,7 @@ suite "Identify":
       msListen {.threadvar.}: MultistreamSelect
       msDial {.threadvar.}: MultistreamSelect
       conn {.threadvar.}: Connection
+      exposedAddr {.threadvar.}: MultiAddress
 
     asyncSetup:
       ma = Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()
@@ -41,7 +42,9 @@ suite "Identify":
       transport1 = TcpTransport.init()
       transport2 = TcpTransport.init()
 
-      identifyProto1 = newIdentify(remotePeerInfo)
+      exposedAddr = Multiaddress.init("/ip4/192.168.1.1/tcp/1337").get()
+
+      identifyProto1 = newIdentify(remotePeerInfo, proc(): MultiAddress = exposedAddr)
       identifyProto2 = newIdentify(remotePeerInfo)
 
       msListen = newMultistream()
@@ -92,6 +95,7 @@ suite "Identify":
 
       check id.pubKey.get() == remoteSecKey.getKey().get()
       check id.addrs[0] == ma
+      check id.observedAddr.get() == exposedAddr
       check id.protoVersion.get() == ProtoVersion
       check id.agentVersion.get() == customAgentVersion
       check id.protos == @["/test/proto1/1.0.0", "/test/proto2/1.0.0"]
@@ -117,3 +121,23 @@ suite "Identify":
         let pi2 = PeerInfo.init(PrivateKey.random(ECDSA, rng[]).get())
         discard await msDial.select(conn, IdentifyCodec)
         discard await identifyProto2.identify(conn, pi2)
+
+    asyncTest "external address provider":
+        msListen.addHandler(IdentifyCodec, identifyProto1)
+        serverFut = transport1.start(ma)
+        proc acceptHandler(): Future[void] {.async, gcsafe.} =
+          let c = await transport1.accept()
+          await msListen.handle(c)
+
+        acceptFut = acceptHandler()
+        conn = await transport2.dial(transport1.ma)
+
+        discard await msDial.select(conn, IdentifyCodec)
+        let id = await identifyProto2.identify(conn, remotePeerInfo)
+
+        check id.pubKey.get() == remoteSecKey.getKey().get()
+        check id.addrs[0] == ma
+        check id.observedAddr.get() == exposedAddr
+        check id.protoVersion.get() == ProtoVersion
+        check id.agentVersion.get() == AgentVersion
+        check id.protos == @["/test/proto1/1.0.0", "/test/proto2/1.0.0"]

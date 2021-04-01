@@ -26,7 +26,7 @@ import
           peerid,
           peerinfo,
           multiaddress,
-          standard_setup,
+          builders,
           crypto/crypto]
 
 import bearssl
@@ -36,4 +36,4 @@ export
   connection, multiaddress, crypto, lpstream,
   bufferstream, bearssl, muxer, mplex, transport,
   tcptransport, noise, errors, cid, multihash,
-  multicodec, standard_setup
+  multicodec, builders

@@ -42,8 +42,13 @@ type
     agentVersion*: Option[string]
     protos*: seq[string]
 
+  CurrentAddressProvider* =
+    proc(): MultiAddress {.raises: [Defect], gcsafe.}
+
   Identify* = ref object of LPProtocol
     peerInfo*: PeerInfo
+    provider*: CurrentAddressProvider
+
 
 proc encodeMsg*(peerInfo: PeerInfo, observedAddr: Multiaddress): ProtoBuffer =
   result = initProtoBuffer()
@@ -101,16 +106,17 @@ proc decodeMsg*(buf: seq[byte]): Option[IdentifyInfo] =
     trace "decodeMsg: failed to decode received message"
     none[IdentifyInfo]()
 
-proc newIdentify*(peerInfo: PeerInfo): Identify =
+proc newIdentify*(peerInfo: PeerInfo, provider: CurrentAddressProvider = nil): Identify =
   new result
   result.peerInfo = peerInfo
+  result.provider = provider
   result.init()
 
 method init*(p: Identify) =
   proc handle(conn: Connection, proto: string) {.async, gcsafe, closure.} =
     try:
       trace "handling identify request", conn
-      var pb = encodeMsg(p.peerInfo, conn.observedAddr)
+      var pb = encodeMsg(p.peerInfo, (if not isNil(p.provider): p.provider() else: conn.observedAddr))
       await conn.writeLp(pb.buffer)
     except CancelledError as exc:
       raise exc
@@ -151,5 +157,5 @@ proc identify*(p: Identify,
 
 proc push*(p: Identify, conn: Connection) {.async.} =
   await conn.write(IdentifyPushCodec)
-  var pb = encodeMsg(p.peerInfo, conn.observedAddr)
+  var pb = encodeMsg(p.peerInfo, (if not isNil(p.provider): p.provider() else: conn.observedAddr))
   await conn.writeLp(pb.buffer)

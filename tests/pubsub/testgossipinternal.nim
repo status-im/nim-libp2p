@@ -5,7 +5,7 @@ include ../../libp2p/protocols/pubsub/gossipsub
 import options
 import unittest, bearssl
 import stew/byteutils
-import ../../libp2p/standard_setup
+import ../../libp2p/builders
 import ../../libp2p/errors
 import ../../libp2p/crypto/crypto
 import ../../libp2p/stream/bufferstream
