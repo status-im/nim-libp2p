@@ -19,6 +19,8 @@ const
   DefaultChanTimeout* = 5.minutes
 
 type
+  MuxerError* = object of LPError
+
   StreamHandler* = proc(conn: Connection): Future[void] {.gcsafe.}
   MuxerHandler* = proc(muxer: Muxer): Future[void] {.gcsafe.}
 

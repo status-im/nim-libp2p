@@ -30,7 +30,7 @@ const
 #TODO: implement push identify, leaving out for now as it is not essential
 
 type
-  IdentifyError* = object of CatchableError
+  IdentifyError* = object of LPError
   IdentityNoMatchError* = object of IdentifyError
   IdentityInvalidMsgError* = object of IdentifyError
 

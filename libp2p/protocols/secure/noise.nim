@@ -85,10 +85,11 @@ type
     readCs: CipherState
     writeCs: CipherState
 
-  NoiseHandshakeError* = object of CatchableError
-  NoiseDecryptTagError* = object of CatchableError
-  NoiseOversizedPayloadError* = object of CatchableError
-  NoiseNonceMaxError* = object of CatchableError # drop connection on purpose
+  NoiseError* = object of LPError
+  NoiseHandshakeError* = object of NoiseError
+  NoiseDecryptTagError* = object of NoiseError
+  NoiseOversizedPayloadError* = object of NoiseError
+  NoiseNonceMaxError* = object of NoiseError # drop connection on purpose
 
 # Utility
 

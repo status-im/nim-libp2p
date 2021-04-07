@@ -68,7 +68,7 @@ type
     writerCoder: SecureCipher
     readerCoder: SecureCipher
 
-  SecioError* = object of CatchableError
+  SecioError* = object of LPError
 
 func shortLog*(conn: SecioConn): auto =
   if conn.isNil: "SecioConn(nil)"
