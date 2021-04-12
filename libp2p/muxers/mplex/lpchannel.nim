@@ -7,6 +7,8 @@
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
 
+{.push raises: [Defect].}
+
 import std/[oids, strformat]
 import pkg/[chronos, chronicles, metrics, nimcrypto/utils]
 import ./coder,
@@ -50,11 +52,15 @@ type
     writes*: int                  # In-flight writes
 
 func shortLog*(s: LPChannel): auto =
-  if s.isNil: "LPChannel(nil)"
-  elif s.conn.peerInfo.isNil: $s.oid
-  elif s.name != $s.oid and s.name.len > 0:
-    &"{shortLog(s.conn.peerInfo.peerId)}:{s.oid}:{s.name}"
-  else: &"{shortLog(s.conn.peerInfo.peerId)}:{s.oid}"
+  try:
+    if s.isNil: "LPChannel(nil)"
+    elif s.conn.peerInfo.isNil: $s.oid
+    elif s.name != $s.oid and s.name.len > 0:
+      &"{shortLog(s.conn.peerInfo.peerId)}:{s.oid}:{s.name}"
+    else: &"{shortLog(s.conn.peerInfo.peerId)}:{s.oid}"
+  except ValueError as exc:
+    raise newException(Defect, exc.msg)
+
 chronicles.formatIt(LPChannel): shortLog(it)
 
 proc open*(s: LPChannel) {.async, gcsafe.} =
@@ -89,7 +95,7 @@ proc reset*(s: LPChannel) {.async, gcsafe.} =
 
   if s.isOpen and not s.conn.isClosed:
     # If the connection is still active, notify the other end
-    proc resetMessage() {.async.} =
+    proc resetMessage() {.async, raises: [Defect].} =
       try:
         trace "sending reset message", s, conn = s.conn
         await s.conn.writeMsg(s.id, s.resetCode) # write reset
@@ -135,7 +141,7 @@ method initStream*(s: LPChannel) =
   if s.objName.len == 0:
     s.objName = "LPChannel"
 
-  s.timeoutHandler = proc(): Future[void] {.gcsafe.} =
+  s.timeoutHandler = proc(): Future[void] {.gcsafe, raises: [Defect].} =
     trace "Idle timeout expired, resetting LPChannel", s
     s.reset()
 

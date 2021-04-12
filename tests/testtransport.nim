@@ -1,6 +1,6 @@
 {.used.}
 
-import unittest, sequtils
+import sequtils
 import chronos, stew/byteutils
 import ../libp2p/[stream/connection,
                   transports/transport,
@@ -19,7 +19,7 @@ suite "TCP transport":
   asyncTest "test listener: handle write":
     let ma: MultiAddress = Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()
     let transport: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-    asyncCheck transport.start(ma)
+    asyncSpawn transport.start(ma)
 
     proc acceptHandler() {.async, gcsafe.} =
       let conn = await transport.accept()
@@ -41,7 +41,7 @@ suite "TCP transport":
     let ma: MultiAddress = Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()
 
     let transport: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-    asyncCheck transport.start(ma)
+    asyncSpawn transport.start(ma)
 
     proc acceptHandler() {.async, gcsafe.} =
       var msg = newSeq[byte](6)
@@ -154,7 +154,7 @@ suite "TCP transport":
   asyncTest "e2e: handle read":
     let ma: MultiAddress = Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()
     let transport1: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-    asyncCheck transport1.start(ma)
+    asyncSpawn transport1.start(ma)
 
     proc acceptHandler() {.async, gcsafe.} =
       let conn = await transport1.accept()

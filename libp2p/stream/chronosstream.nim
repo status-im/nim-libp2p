@@ -7,6 +7,8 @@
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
 
+{.push raises: [Defect].}
+
 import std/[oids, strformat]
 import chronos, chronicles, metrics
 import connection
@@ -31,10 +33,14 @@ when defined(libp2p_agents_metrics):
   declareCounter(libp2p_peers_traffic_read, "incoming traffic", labels = ["agent"])
   declareCounter(libp2p_peers_traffic_write, "outgoing traffic", labels = ["agent"])
 
-func shortLog*(conn: ChronosStream): string =
-  if conn.isNil: "ChronosStream(nil)"
-  elif conn.peerInfo.isNil: $conn.oid
-  else: &"{shortLog(conn.peerInfo.peerId)}:{conn.oid}"
+func shortLog*(conn: ChronosStream): auto =
+  try:
+    if conn.isNil: "ChronosStream(nil)"
+    elif conn.peerInfo.isNil: $conn.oid
+    else: &"{shortLog(conn.peerInfo.peerId)}:{conn.oid}"
+  except ValueError as exc:
+    raiseAssert(exc.msg)
+
 chronicles.formatIt(ChronosStream): shortLog(it)
 
 method initStream*(s: ChronosStream) =
@@ -104,7 +110,9 @@ method readOnce*(s: ChronosStream, pbytes: pointer, nbytes: int): Future[int] {.
       if s.tracked:
         libp2p_peers_traffic_read.inc(nbytes.int64, labelValues = [s.shortAgent])
 
-method write*(s: ChronosStream, msg: seq[byte]) {.async.} =
+method write*(s: ChronosStream, msg: seq[byte])
+  {.async, raises: [Defect, LPStreamClosedError].} =
+
   if s.closed:
     raise newLPStreamClosedError()
 
@@ -126,10 +134,10 @@ method write*(s: ChronosStream, msg: seq[byte]) {.async.} =
       if s.tracked:
         libp2p_peers_traffic_write.inc(msg.len.int64, labelValues = [s.shortAgent])
 
-method closed*(s: ChronosStream): bool {.raises: [Defect].} =
+method closed*(s: ChronosStream): bool =
   result = s.client.closed
 
-method atEof*(s: ChronosStream): bool {.raises: [Defect].} =
+method atEof*(s: ChronosStream): bool =
   s.client.atEof()
 
 method closeImpl*(s: ChronosStream) {.async.} =

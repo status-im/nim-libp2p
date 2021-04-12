@@ -1,4 +1,4 @@
-import unittest, sequtils
+import sequtils
 import chronos
 import ../libp2p/[connmanager,
                   stream/connection,

@@ -1,10 +1,10 @@
-import unittest
 import chronos, stew/byteutils
 import ../libp2p/stream/bufferstream,
        ../libp2p/stream/lpstream,
        ../libp2p/errors
 
 import ./helpers
+import ./asyncunit
 
 {.used.}
 

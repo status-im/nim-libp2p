@@ -1,4 +1,4 @@
-import std/unittest
+{.push raises: [Defect].}
 
 import chronos, bearssl
 
@@ -9,7 +9,8 @@ import ../libp2p/stream/lpstream
 import ../libp2p/muxers/mplex/lpchannel
 import ../libp2p/protocols/secure/secure
 
-export unittest
+import ./asyncunit
+export asyncunit
 
 const
   StreamTransportTrackerName = "stream.transport"
@@ -48,27 +49,6 @@ template checkTrackers*() =
   # Also test the GC is not fooling with us
   GC_fullCollect()
 
-template asyncTeardown*(body: untyped): untyped =
-  teardown:
-    waitFor((
-      proc() {.async, gcsafe.} =
-        body
-    )())
-
-template asyncSetup*(body: untyped): untyped =
-  setup:
-    waitFor((
-      proc() {.async, gcsafe.} =
-        body
-    )())
-
-template asyncTest*(name: string, body: untyped): untyped =
-  test name:
-    waitFor((
-      proc() {.async, gcsafe.} =
-        body
-    )())
-
 type RngWrap = object
   rng: ref BrHmacDrbgContext
 
@@ -87,7 +67,7 @@ template rng*(): ref BrHmacDrbgContext =
   getRng()
 
 type
-  WriteHandler* = proc(data: seq[byte]): Future[void] {.gcsafe.}
+  WriteHandler* = proc(data: seq[byte]): Future[void] {.gcsafe, raises: [Defect].}
   TestBufferStream* = ref object of BufferStream
     writeHandler*: WriteHandler
 
@@ -99,7 +79,7 @@ proc newBufferStream*(writeHandler: WriteHandler): TestBufferStream =
   result.writeHandler = writeHandler
   result.initStream()
 
-proc checkExpiringInternal(cond: proc(): bool): Future[bool] {.async, gcsafe.} =
+proc checkExpiringInternal(cond: proc(): bool {.raises: [Defect].} ): Future[bool] {.async, gcsafe.} =
   {.gcsafe.}:
     let start = Moment.now()
     while true:

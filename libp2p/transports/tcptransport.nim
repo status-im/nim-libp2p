@@ -7,6 +7,8 @@
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
 
+{.push raises: [Defect].}
+
 import std/[oids, sequtils, tables]
 import chronos, chronicles
 import transport,
@@ -234,7 +236,7 @@ method handles*(
   self: TcpTransport,
   address: MultiAddress): bool {.gcsafe.} =
   if procCall Transport(self).handles(address):
-    return address.protocols
-      .tryGet()
-      .filterIt( it == multiCodec("tcp") )
-      .len > 0
+    let protos = address.protocols
+    if protos.isOk:
+      let matching = protos.get().filterIt( it == multiCodec("tcp") )
+      return matching.len > 0

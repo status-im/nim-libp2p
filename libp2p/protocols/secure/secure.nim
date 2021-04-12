@@ -16,6 +16,8 @@ import ../protocol,
        ../../peerinfo,
        ../../errors
 
+{.push raises: [Defect].}
+
 export protocol
 
 logScope:
@@ -32,9 +34,13 @@ type
     buf: StreamSeq
 
 func shortLog*(conn: SecureConn): auto =
-  if conn.isNil: "SecureConn(nil)"
-  elif conn.peerInfo.isNil: $conn.oid
-  else: &"{shortLog(conn.peerInfo.peerId)}:{conn.oid}"
+  try:
+    if conn.isNil: "SecureConn(nil)"
+    elif conn.peerInfo.isNil: $conn.oid
+    else: &"{shortLog(conn.peerInfo.peerId)}:{conn.oid}"
+  except ValueError as exc:
+    raiseAssert(exc.msg)
+
 chronicles.formatIt(SecureConn): shortLog(it)
 
 proc init*(T: type SecureConn,
@@ -120,6 +126,7 @@ method init*(s: Secure) =
     except CatchableError as exc:
       warn "securing connection failed", err = exc.msg, conn
       await conn.close()
+      raise exc
 
   s.handler = handle
 

@@ -1,6 +1,6 @@
-import stew/bitops2
-
 {.push raises: [Defect].}
+
+import stew/bitops2
 
 type
   StreamSeq* = object

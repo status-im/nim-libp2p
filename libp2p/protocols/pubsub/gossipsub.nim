@@ -7,6 +7,8 @@
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
 
+{.push raises: [Defect].}
+
 import std/[tables, sets, options, sequtils, random]
 import chronos, chronicles, metrics, bearssl
 import ./pubsub,
@@ -72,7 +74,9 @@ proc init*(_: type[GossipSubParams]): GossipSubParams =
 proc validateParameters*(parameters: GossipSubParams): Result[void, cstring] =
   if  (parameters.dOut >= parameters.dLow) or
       (parameters.dOut > (parameters.d div 2)):
-    err("gossipsub: dOut parameter error, Number of outbound connections to keep in the mesh. Must be less than D_lo and at most D/2")
+    err("gossipsub: dOut parameter error, " &
+      "Number of outbound connections to keep in the mesh. " &
+      "Must be less than D_lo and at most D/2")
   elif parameters.gossipThreshold >= 0:
     err("gossipsub: gossipThreshold parameter error, Must be < 0")
   elif parameters.publishThreshold >= parameters.gossipThreshold:
@@ -558,7 +562,8 @@ method publish*(g: GossipSub,
 
   return peers.len
 
-proc maintainDirectPeers(g: GossipSub) {.async.} =
+proc maintainDirectPeers(g: GossipSub)
+  {.async, raises: [Defect, CancelledError].} =
   while g.heartbeatRunning:
     for id, addrs in g.parameters.directPeers:
       let peer = g.peers.getOrDefault(id)
@@ -569,9 +574,9 @@ proc maintainDirectPeers(g: GossipSub) {.async.} =
           let _ = await g.switch.dial(id, addrs, g.codecs)
           # populate the peer after it's connected
           discard g.getOrCreatePeer(id, g.codecs)
-        except CancelledError:
+        except CancelledError as exc:
           trace "Direct peer dial canceled"
-          raise
+          raise exc
         except CatchableError as exc:
           debug "Direct peer error dialing", msg = exc.msg
 
@@ -603,13 +608,16 @@ method stop*(g: GossipSub) {.async.} =
     trace "heartbeat stopped"
     g.heartbeatFut = nil
 
-method initPubSub*(g: GossipSub) =
+method initPubSub*(g: GossipSub)
+  {.raises: [Defect, InitializationError].} =
   procCall FloodSub(g).initPubSub()
 
   if not g.parameters.explicit:
     g.parameters = GossipSubParams.init()
 
-  g.parameters.validateParameters().tryGet()
+  let validationRes = g.parameters.validateParameters()
+  if validationRes.isErr:
+    raise newException(InitializationError, $validationRes.error)
 
   randomize()
 

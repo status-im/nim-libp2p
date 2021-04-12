@@ -1,4 +1,4 @@
-import unittest, options, bearssl
+import options, bearssl
 import chronos, strutils
 import ../libp2p/[protocols/identify,
                   multiaddress,
@@ -10,6 +10,7 @@ import ../libp2p/[protocols/identify,
                   transports/tcptransport,
                   crypto/crypto,
                   upgrademngrs/upgrade]
+
 import ./helpers
 
 when defined(nimHasUsed): {.used.}
@@ -99,7 +100,7 @@ suite "Identify":
 
     asyncTest "handle failed identify":
       msListen.addHandler(IdentifyCodec, identifyProto1)
-      asyncCheck transport1.start(ma)
+      asyncSpawn transport1.start(ma)
 
       proc acceptHandler() {.async.} =
         var conn: Connection

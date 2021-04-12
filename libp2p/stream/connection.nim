@@ -7,6 +7,8 @@
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
 
+{.push raises: [Defect].}
+
 import std/[hashes, oids, strformat]
 import chronicles, chronos, metrics
 import lpstream,
@@ -24,7 +26,7 @@ const
   DefaultConnectionTimeout* = 5.minutes
 
 type
-  TimeoutHandler* = proc(): Future[void] {.gcsafe.}
+  TimeoutHandler* = proc(): Future[void] {.gcsafe, raises: [Defect].}
 
   Connection* = ref object of LPStream
     activity*: bool                 # reset every time data is sent or received
@@ -55,9 +57,13 @@ proc onUpgrade*(s: Connection) {.async.} =
     await s.upgraded
 
 func shortLog*(conn: Connection): string =
-  if conn.isNil: "Connection(nil)"
-  elif conn.peerInfo.isNil: $conn.oid
-  else: &"{shortLog(conn.peerInfo.peerId)}:{conn.oid}"
+  try:
+    if conn.isNil: "Connection(nil)"
+    elif conn.peerInfo.isNil: $conn.oid
+    else: &"{shortLog(conn.peerInfo.peerId)}:{conn.oid}"
+  except ValueError as exc:
+    raiseAssert(exc.msg)
+
 chronicles.formatIt(Connection): shortLog(it)
 
 method initStream*(s: Connection) =

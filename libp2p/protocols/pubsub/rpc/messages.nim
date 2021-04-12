@@ -7,6 +7,8 @@
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
 
+{.push raises: [Defect].}
+
 import options, sequtils
 import ../../../utility
 import ../../../peerid
@@ -17,7 +19,7 @@ type
     PeerInfoMsg* = object
       peerID*: seq[byte]
       signedPeerRecord*: seq[byte]
-    
+
     SubOpts* = object
       subscribe*: bool
       topic*: string

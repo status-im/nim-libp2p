@@ -7,6 +7,8 @@
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
 
+{.push raises: [Defect].}
+
 import std/[sequtils, strutils, tables, hashes]
 import chronos, chronicles, nimcrypto/sha2, metrics
 import rpc/[messages, message, protobuf],
@@ -15,7 +17,8 @@ import rpc/[messages, message, protobuf],
        ../../stream/connection,
        ../../crypto/crypto,
        ../../protobuf/minprotobuf,
-       ../../utility
+       ../../utility,
+       ../../switch
 
 export peerid, connection
 
@@ -40,9 +43,9 @@ type
   PubsubPeerEvent* = object
     kind*: PubSubPeerEventKind
 
-  GetConn* = proc(): Future[Connection] {.gcsafe.}
-  DropConn* = proc(peer: PubsubPeer) {.gcsafe.} # have to pass peer as it's unknown during init
-  OnEvent* = proc(peer: PubSubPeer, event: PubsubPeerEvent) {.gcsafe.}
+  GetConn* = proc(): Future[Connection] {.gcsafe, raises: [Defect, DialFailedError].}
+  DropConn* = proc(peer: PubsubPeer) {.gcsafe, raises: [Defect].} # have to pass peer as it's unknown during init
+  OnEvent* = proc(peer: PubSubPeer, event: PubsubPeerEvent) {.gcsafe, raises: [Defect].}
 
   PubSubPeer* = ref object of RootObj
     getConn*: GetConn                   # callback to establish a new send connection
@@ -64,7 +67,8 @@ type
     when defined(libp2p_agents_metrics):
       shortAgent*: string
 
-  RPCHandler* = proc(peer: PubSubPeer, msg: RPCMsg): Future[void] {.gcsafe.}
+  RPCHandler* = proc(peer: PubSubPeer, msg: RPCMsg): Future[void]
+    {.gcsafe, raises: [Defect].}
 
 func hash*(p: PubSubPeer): Hash =
   p.peerId.hash
@@ -158,7 +162,7 @@ proc connectOnce(p: PubSubPeer): Future[void] {.async.} =
   try:
     let newConn = await p.getConn()
     if newConn.isNil:
-      raise (ref CatchableError)(msg: "Cannot establish send connection")
+      raise (ref LPError)(msg: "Cannot establish send connection")
 
     # When the send channel goes up, subscriptions need to be sent to the
     # remote peer - if we had multiple channels up and one goes down, all
@@ -181,8 +185,8 @@ proc connectOnce(p: PubSubPeer): Future[void] {.async.} =
     try:
       if p.onEvent != nil:
         p.onEvent(p, PubsubPeerEvent(kind: PubSubPeerEventKind.Disconnected))
-    except CancelledError:
-      raise
+    except CancelledError as exc:
+      raise exc
     except CatchableError as exc:
       debug "Errors during diconnection events", error = exc.msg
 
@@ -264,11 +268,13 @@ proc send*(p: PubSubPeer, msg: RPCMsg, anonymize: bool) {.raises: [Defect].} =
   except Exception as exc: # TODO chronos Exception
     raiseAssert exc.msg)
 
-proc newPubSubPeer*(peerId: PeerID,
-                    getConn: GetConn,
-                    dropConn: DropConn,
-                    onEvent: OnEvent,
-                    codec: string): PubSubPeer =
+proc newPubSubPeer*(
+  peerId: PeerID,
+  getConn: GetConn,
+  dropConn: DropConn,
+  onEvent: OnEvent,
+  codec: string): PubSubPeer =
+
   PubSubPeer(
     getConn: getConn,
     dropConn: dropConn,

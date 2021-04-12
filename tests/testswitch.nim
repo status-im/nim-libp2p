@@ -1,6 +1,6 @@
 {.used.}
 
-import unittest, options, sequtils
+import options, sequtils
 import chronos
 import stew/byteutils
 import nimcrypto/sysrand
@@ -20,6 +20,7 @@ import ../libp2p/[errors,
                   stream/lpstream,
                   stream/chronosstream,
                   transports/tcptransport]
+
 import ./helpers
 
 const

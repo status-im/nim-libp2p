@@ -1,7 +1,5 @@
 import options, tables
-import unittest
 import chronos, chronicles, stew/byteutils
-import helpers
 import ../libp2p/[daemon/daemonapi,
                   protobuf/minprotobuf,
                   vbuffer,
@@ -27,6 +25,8 @@ import ../libp2p/[daemon/daemonapi,
                   protocols/pubsub/pubsub,
                   protocols/pubsub/floodsub,
                   protocols/pubsub/gossipsub]
+
+import ./helpers
 
 type
   # TODO: Unify both PeerInfo structs
@@ -151,7 +151,7 @@ proc testPubSubNodePublish(gossip: bool = false, count: int = 1) {.async.} =
   let peer = NativePeerInfo.init(
     daemonPeer.peer,
     daemonPeer.addresses)
-  await nativeNode.connect(peer)
+  await nativeNode.connect(peer.peerId, peer.addrs)
 
   await sleepAsync(1.seconds)
   await daemonNode.connect(nativePeer.peerId, nativePeer.addrs)
@@ -216,9 +216,11 @@ suite "Interop":
       testFuture.complete()
 
     await daemonNode.addHandler(protos, daemonHandler)
-    let conn = await nativeNode.dial(NativePeerInfo.init(daemonPeer.peer,
-                                                          daemonPeer.addresses),
-                                                          protos[0])
+    let conn = await nativeNode.dial(
+      daemonPeer.peer,
+      daemonPeer.addresses,
+      protos[0])
+
     await conn.writeLp("test 1")
     check "test 2" == string.fromBytes((await conn.readLp(1024)))
 
@@ -264,9 +266,10 @@ suite "Interop":
       await stream.close()
 
     await daemonNode.addHandler(protos, daemonHandler)
-    let conn = await nativeNode.dial(NativePeerInfo.init(daemonPeer.peer,
-                                                          daemonPeer.addresses),
-                                                          protos[0])
+    let conn = await nativeNode.dial(
+      daemonPeer.peer,
+      daemonPeer.addresses,
+      protos[0])
     await conn.writeLp(test & "\r\n")
     check expect == (await wait(testFuture, 10.secs))
 

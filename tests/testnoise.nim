@@ -9,7 +9,7 @@
 
 {.used.}
 
-import unittest, tables, bearssl
+import tables, bearssl
 import chronos, stew/byteutils
 import chronicles
 import ../libp2p/crypto/crypto
@@ -32,6 +32,7 @@ import ../libp2p/[switch,
                   protocols/secure/secure,
                   upgrademngrs/muxedupgrade,
                   connmanager]
+
 import ./helpers
 
 const
@@ -39,16 +40,6 @@ const
 
 type
   TestProto = ref object of LPProtocol
-
-method init(p: TestProto) {.gcsafe.} =
-  proc handle(conn: Connection, proto: string) {.async, gcsafe.} =
-    let msg = string.fromBytes(await conn.readLp(1024))
-    check "Hello!" == msg
-    await conn.writeLp("Hello!")
-    await conn.close()
-
-  p.codec = TestCodec
-  p.handler = handle
 
 proc createSwitch(ma: MultiAddress; outgoing: bool, secio: bool = false): (Switch, PeerInfo) =
   var peerInfo: PeerInfo = PeerInfo.init(PrivateKey.random(ECDSA, rng[]).get())
@@ -91,7 +82,7 @@ suite "Noise":
       serverNoise = newNoise(rng, serverInfo.privateKey, outgoing = false)
 
     let transport1: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-    asyncCheck transport1.start(server)
+    asyncSpawn transport1.start(server)
 
     proc acceptHandler() {.async.} =
       let conn = await transport1.accept()
@@ -130,7 +121,7 @@ suite "Noise":
     let
       transport1: TcpTransport = TcpTransport.init(upgrade = Upgrade())
 
-    asyncCheck transport1.start(server)
+    asyncSpawn transport1.start(server)
 
     proc acceptHandler() {.async, gcsafe.} =
       var conn: Connection
@@ -165,7 +156,7 @@ suite "Noise":
       readTask = newFuture[void]()
 
     let transport1: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-    asyncCheck transport1.start(server)
+    asyncSpawn transport1.start(server)
 
     proc acceptHandler() {.async, gcsafe.} =
       let conn = await transport1.accept()
@@ -236,6 +227,12 @@ suite "Noise":
     await listenFut
 
   asyncTest "e2e use switch dial proto string":
+    proc handle(conn: Connection, proto: string) {.async, gcsafe, raises: [Defect].} =
+      let msg = string.fromBytes(await conn.readLp(1024))
+      check "Hello!" == msg
+      await conn.writeLp("Hello!")
+      await conn.close()
+
     let ma1: MultiAddress = Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()
     let ma2: MultiAddress = Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()
 
@@ -246,13 +243,14 @@ suite "Noise":
     (switch1, peerInfo1) = createSwitch(ma1, false)
 
     let testProto = new TestProto
-    testProto.init()
     testProto.codec = TestCodec
+    testProto.handler = handle
+
     switch1.mount(testProto)
     (switch2, peerInfo2) = createSwitch(ma2, true)
     awaiters.add(await switch1.start())
     awaiters.add(await switch2.start())
-    let conn = await switch2.dial(switch1.peerInfo, TestCodec)
+    let conn = await switch2.dial(switch1.peerInfo.peerId, switch1.peerInfo.addrs, TestCodec)
     await conn.writeLp("Hello!")
     let msg = string.fromBytes(await conn.readLp(1024))
     check "Hello!" == msg
@@ -264,6 +262,12 @@ suite "Noise":
     await allFuturesThrowing(awaiters)
 
   asyncTest "e2e test wrong secure negotiation":
+    proc handle(conn: Connection, proto: string) {.async, gcsafe, raises: [Defect].} =
+      let msg = string.fromBytes(await conn.readLp(1024))
+      check "Hello!" == msg
+      await conn.writeLp("Hello!")
+      await conn.close()
+
     let ma1: MultiAddress = Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()
     let ma2: MultiAddress = Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()
 
@@ -274,14 +278,17 @@ suite "Noise":
     (switch1, peerInfo1) = createSwitch(ma1, false)
 
     let testProto = new TestProto
-    testProto.init()
     testProto.codec = TestCodec
+    testProto.handler = handle
     switch1.mount(testProto)
     (switch2, peerInfo2) = createSwitch(ma2, true, true) # secio, we want to fail
     awaiters.add(await switch1.start())
     awaiters.add(await switch2.start())
     expect(UpgradeFailedError):
-      let conn = await switch2.dial(switch1.peerInfo, TestCodec)
+      let conn = await switch2.dial(
+        switch1.peerInfo.peerId,
+        switch1.peerInfo.addrs,
+        TestCodec)
 
     await allFuturesThrowing(
       switch1.stop(),

@@ -6,6 +6,9 @@
 ## at your option.
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
+
+{.push raises: [Defect].}
+
 import std/[oids, strformat]
 import chronos, chronicles, stew/endians2, bearssl
 import nimcrypto/[hmac, sha2, sha, hash, rijndael, twofish, bcmode]
@@ -71,9 +74,13 @@ type
   SecioError* = object of LPError
 
 func shortLog*(conn: SecioConn): auto =
-  if conn.isNil: "SecioConn(nil)"
-  elif conn.peerInfo.isNil: $conn.oid
-  else: &"{shortLog(conn.peerInfo.peerId)}:{conn.oid}"
+  try:
+    if conn.isNil: "SecioConn(nil)"
+    elif conn.peerInfo.isNil: $conn.oid
+    else: &"{shortLog(conn.peerInfo.peerId)}:{conn.oid}"
+  except ValueError as exc:
+    raiseAssert(exc.msg)
+
 chronicles.formatIt(SecioConn): shortLog(it)
 
 proc init(mac: var SecureMac, hash: string, key: openarray[byte]) =
@@ -250,7 +257,8 @@ proc newSecioConn(conn: Connection,
                   cipher: string,
                   secrets: Secret,
                   order: int,
-                  remotePubKey: PublicKey): SecioConn =
+                  remotePubKey: PublicKey): SecioConn
+                  {.raises: [Defect, ResultError[cstring]].} =
   ## Create new secure stream/lpstream, using specified hash algorithm ``hash``,
   ## cipher algorithm ``cipher``, stretched keys ``secrets`` and order
   ## ``order``.
@@ -422,7 +430,10 @@ method init(s: Secio) {.gcsafe.} =
   procCall Secure(s).init()
   s.codec = SecioCodec
 
-proc newSecio*(rng: ref BrHmacDrbgContext, localPrivateKey: PrivateKey): Secio =
+proc newSecio*(
+  rng: ref BrHmacDrbgContext,
+  localPrivateKey: PrivateKey): Secio
+  {.raises: [Defect, ResultError[CryptoError]].} =
   result = Secio(
     rng: rng,
     localPrivateKey: localPrivateKey,

@@ -7,11 +7,16 @@
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
 
+{.push raises: [Defect, DialFailedError].}
+
 import chronos
 import peerid,
        stream/connection
 
+export peerid, connection
+
 type
+  DialFailedError* = object of LPError
   Dial* = ref object of RootObj
 
 method connect*(

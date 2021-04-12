@@ -7,6 +7,8 @@
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
 
+{.push raises: [Defect].}
+
 import std/[sugar, tables]
 
 import pkg/[chronos,
@@ -32,8 +34,6 @@ declareCounter(libp2p_failed_dials, "failed dials")
 declareCounter(libp2p_failed_upgrades_outgoing, "outgoing connections failed upgrades")
 
 type
-  DialFailedError* = object of CatchableError
-
   Dialer* = ref object of Dial
     peerInfo*: PeerInfo
     ms: MultistreamSelect
@@ -151,7 +151,8 @@ proc internalConnect(
 method connect*(
   self: Dialer,
   peerId: PeerID,
-  addrs: seq[MultiAddress]) {.async.} =
+  addrs: seq[MultiAddress])
+  {.async, raises: [Defect, DialFailedError].} =
   ## connect remote peer without negotiating
   ## a protocol
   ##
@@ -176,7 +177,8 @@ proc negotiateStream(
 method dial*(
   self: Dialer,
   peerId: PeerID,
-  protos: seq[string]): Future[Connection] {.async.} =
+  protos: seq[string]): Future[Connection]
+  {.async, raises: [Defect, DialFailedError].} =
   ## create a protocol stream over an
   ## existing connection
   ##
@@ -192,7 +194,8 @@ method dial*(
   self: Dialer,
   peerId: PeerID,
   addrs: seq[MultiAddress],
-  protos: seq[string]): Future[Connection] {.async.} =
+  protos: seq[string]): Future[Connection]
+  {.async, raises: [Defect, DialFailedError].} =
   ## create a protocol stream and establish
   ## a connection if one doesn't exist already
   ##
@@ -219,12 +222,8 @@ method dial*(
         "Couldn't get muxed stream")
 
     return await self.negotiateStream(stream, protos)
-  except CancelledError as exc:
-    trace "Dial canceled", conn
-    await cleanup()
-    raise exc
   except CatchableError as exc:
-    debug "Error dialing", conn, msg = exc.msg
+    debug "Exception dialing", conn, msg = exc.msg
     await cleanup()
     raise exc
 

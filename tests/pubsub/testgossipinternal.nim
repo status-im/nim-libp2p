@@ -3,7 +3,7 @@ include ../../libp2p/protocols/pubsub/gossipsub
 {.used.}
 
 import options
-import unittest, bearssl
+import bearssl
 import stew/byteutils
 import ../../libp2p/builders
 import ../../libp2p/errors
@@ -18,8 +18,9 @@ type
 
 proc noop(data: seq[byte]) {.async, gcsafe.} = discard
 
-proc getPubSubPeer(p: TestGossipSub, peerId: PeerID): PubSubPeer =
-  proc getConn(): Future[Connection] =
+proc getPubSubPeer(p: TestGossipSub, peerId: PeerID): PubSubPeer
+  {.raises: [Defect, DialFailedError].} =
+  proc getConn(): Future[Connection] {.raises: [Defect, DialFailedError].} =
     p.switch.dial(peerId, GossipSubCodec)
 
   proc dropConn(peer: PubSubPeer) =
@@ -33,7 +34,8 @@ proc getPubSubPeer(p: TestGossipSub, peerId: PeerID): PubSubPeer =
   onNewPeer(p, pubSubPeer)
   pubSubPeer
 
-proc randomPeerInfo(): PeerInfo =
+proc randomPeerInfo(): PeerInfo
+  {.raises: [Defect, ResultError[cstring]].} =
   PeerInfo.init(PrivateKey.random(ECDSA, rng[]).get())
 
 suite "GossipSub internal":

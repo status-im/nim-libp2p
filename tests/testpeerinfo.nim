@@ -1,6 +1,6 @@
 {.used.}
 
-import unittest, options, bearssl
+import options, bearssl
 import chronos
 import ../libp2p/crypto/crypto,
        ../libp2p/peerinfo,

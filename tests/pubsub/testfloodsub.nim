@@ -9,7 +9,7 @@
 
 {.used.}
 
-import unittest, sequtils, options, tables, sets
+import sequtils, options, tables, sets
 import chronos, stew/byteutils
 import utils,
        ../../libp2p/[errors,

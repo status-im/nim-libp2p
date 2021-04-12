@@ -7,6 +7,8 @@
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
 
+{.push raises: [Defect].}
+
 import std/[strutils]
 import chronos, chronicles, stew/byteutils
 import stream/connection,
@@ -25,7 +27,7 @@ const
   Ls* = "\x03ls\n"
 
 type
-  Matcher* = proc (proto: string): bool {.gcsafe.}
+  Matcher* = proc (proto: string): bool {.gcsafe, raises: [Defect].}
 
   HandlerHolder* = object
     protos*: seq[string]

@@ -7,6 +7,8 @@
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
 
+{.push raises: [Defect].}
+
 import pkg/[chronos, nimcrypto/utils, chronicles, stew/byteutils]
 import ../../stream/connection,
        ../../utility,
@@ -56,7 +58,8 @@ proc readMsg*(conn: Connection): Future[Msg] {.async, gcsafe.} =
 proc writeMsg*(conn: Connection,
                id: uint64,
                msgType: MessageType,
-               data: seq[byte] = @[]): Future[void] =
+               data: seq[byte] = @[]): Future[void]
+               {.raises: [Defect, LPStreamClosedError].} =
   var
     left = data.len
     offset = 0
@@ -85,5 +88,6 @@ proc writeMsg*(conn: Connection,
 proc writeMsg*(conn: Connection,
                id: uint64,
                msgType: MessageType,
-               data: string): Future[void] =
+               data: string): Future[void]
+               {.raises: [Defect, LPStreamClosedError].} =
   conn.writeMsg(id, msgType, data.toBytes())

@@ -7,6 +7,8 @@
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
 
+{.push raises: [Defect].}
+
 import std/[sequtils, sets, tables]
 import chronos, chronicles, metrics
 import ./pubsub,
@@ -45,19 +47,18 @@ method subscribeTopic*(f: FloodSub,
     trace "ignoring unknown peer"
     return
 
-  if subscribe and not(isNil(f.subscriptionValidator)) and not(f.subscriptionValidator(topic)):
+  if subscribe and
+    not(isNil(f.subscriptionValidator)) and
+    not(f.subscriptionValidator(topic)):
     # this is a violation, so warn should be in order
     warn "ignoring invalid topic subscription", topic, peer
     return
 
   if subscribe:
-    if topic notin f.floodsub:
-      f.floodsub[topic] = initHashSet[PubSubPeer]()
-
-    trace "adding subscription for topic", peer, topic
-
     # subscribe the peer to the topic
-    f.floodsub[topic].incl(peer)
+    trace "adding subscription for topic", peer, topic
+    f.floodsub.mgetOrPut(topic,
+      initHashSet[PubSubPeer]()).incl(peer)
   else:
     if topic notin f.floodsub:
       return
@@ -65,7 +66,8 @@ method subscribeTopic*(f: FloodSub,
     trace "removing subscription for topic", peer, topic
 
     # unsubscribe the peer from the topic
-    f.floodsub[topic].excl(peer)
+    f.floodsub.withValue(topic, topics):
+      topics[].excl(peer)
 
 method unsubscribePeer*(f: FloodSub, peer: PeerID) =
   ## handle peer disconnects
@@ -203,7 +205,8 @@ method unsubscribeAll*(f: FloodSub, topic: string) =
   for p in f.peers.values:
     f.sendSubs(p, @[topic], false)
 
-method initPubSub*(f: FloodSub) =
+method initPubSub*(f: FloodSub)
+  {.raises: [Defect, InitializationError].} =
   procCall PubSub(f).initPubSub()
   f.seen = TimedCache[MessageID].init(2.minutes)
   f.init()

@@ -11,14 +11,15 @@ requires "nim >= 1.2.0",
          "nimcrypto >= 0.4.1",
          "bearssl >= 0.1.4",
          "chronicles >= 0.7.2",
-         "chronos >= 2.5.2",
+         "chronos >= 3.0.0",
          "metrics",
          "secp256k1",
-         "stew#head"
+         "stew#head",
+         "unittest2"
 
 proc runTest(filename: string, verify: bool = true, sign: bool = true,
              moreoptions: string = "") =
-  var excstr = "nim c --opt:speed -d:debug -d:libp2p_agents_metrics -d:libp2p_protobuf_metrics --verbosity:0 --hints:off"
+  var excstr = "nim c -d:chronosStrictException --opt:speed -d:debug -d:libp2p_agents_metrics -d:libp2p_protobuf_metrics --verbosity:0 --hints:off"
   excstr.add(" --warning[CaseTransition]:off --warning[ObservableStores]:off --warning[LockLevel]:off")
   excstr.add(" -d:libp2p_pubsub_sign=" & $sign)
   excstr.add(" -d:libp2p_pubsub_verify=" & $verify)

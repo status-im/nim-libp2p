@@ -7,6 +7,8 @@
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
 
+{.push raises: [Defect].}
+
 import std/[tables, sequtils, sets, strutils]
 import chronos, chronicles, metrics
 import pubsubpeer,
@@ -68,14 +70,18 @@ declarePublicCounter(libp2p_pubsub_received_graft, "pubsub broadcast graft", lab
 declarePublicCounter(libp2p_pubsub_received_prune, "pubsub broadcast prune", labels = ["topic"])
 
 type
+  InitializationError* = object of LPError
+
   TopicHandler* = proc(topic: string,
-                       data: seq[byte]): Future[void] {.gcsafe.}
+                       data: seq[byte]): Future[void]
+                       {.gcsafe, raises: [Defect].}
 
   ValidationResult* {.pure.} = enum
     Accept, Reject, Ignore
 
   ValidatorHandler* = proc(topic: string,
-                           message: Message): Future[ValidationResult] {.gcsafe.}
+                           message: Message): Future[ValidationResult]
+                           {.gcsafe, raises: [Defect].}
 
   TopicPair* = tuple[topic: string, handler: TopicHandler]
 
@@ -106,8 +112,7 @@ type
     msgSeqno*: uint64
     anonymize*: bool                   # if we omit fromPeer and seqno from RPC messages we send
     subscriptionValidator*: SubscriptionValidator # callback used to validate subscriptions
-    topicsHigh*: int                  # the maximum number of topics we allow in a subscription message (application specific, defaults to int max)
-
+    topicsHigh*: int                   # the maximum number of topics we allow in a subscription message (application specific, defaults to int max)
     knownTopics*: HashSet[string]
 
 method unsubscribePeer*(p: PubSub, peerId: PeerID) {.base.} =
@@ -253,7 +258,8 @@ method rpcHandler*(p: PubSub,
       else:
         libp2p_pubsub_received_prune.inc(labelValues = ["generic"])
 
-method onNewPeer(p: PubSub, peer: PubSubPeer) {.base.} = discard
+method onNewPeer(p: PubSub, peer: PubSubPeer) {.base.} =
+  discard
 
 method onPubSubPeerEvent*(p: PubSub, peer: PubsubPeer, event: PubsubPeerEvent) {.base, gcsafe.} =
   # Peer event is raised for the send connection in particular
@@ -267,39 +273,42 @@ method onPubSubPeerEvent*(p: PubSub, peer: PubsubPeer, event: PubsubPeerEvent) {
 proc getOrCreatePeer*(
   p: PubSub,
   peer: PeerID,
-  protos: seq[string]): PubSubPeer =
-  if peer in p.peers:
-    return p.peers[peer]
+  protos: seq[string]): PubSubPeer
+  {.raises: [Defect, DialFailedError].} =
+  if peer notin p.peers:
+    proc getConn(): Future[Connection] {.raises: [Defect, DialFailedError].} =
+      p.switch.dial(peer, protos)
 
-  proc getConn(): Future[Connection] =
-    p.switch.dial(peer, protos)
+    proc dropConn(peer: PubSubPeer) =
+      proc dropConnAsync(peer: PubsubPeer) {.async, raises: [Defect].} =
+        try:
+          await p.switch.disconnect(peer.peerId)
+        except CatchableError as exc: # never cancelled
+          trace "Failed to close connection", peer, error = exc.name, msg = exc.msg
+      asyncSpawn dropConnAsync(peer)
 
-  proc dropConn(peer: PubSubPeer) =
-    proc dropConnAsync(peer: PubsubPeer) {.async.} =
-      try:
-        await p.switch.disconnect(peer.peerId)
-      except CatchableError as exc: # never cancelled
-        trace "Failed to close connection", peer, error = exc.name, msg = exc.msg
-    asyncSpawn dropConnAsync(peer)
+    proc onEvent(peer: PubsubPeer, event: PubsubPeerEvent) {.gcsafe, raises: [Defect].} =
+      p.onPubSubPeerEvent(peer, event)
 
-  proc onEvent(peer: PubsubPeer, event: PubsubPeerEvent) {.gcsafe.} =
-    p.onPubSubPeerEvent(peer, event)
+    # create new pubsub peer
+    let pubSubPeer = newPubSubPeer(peer,
+                                   getConn,
+                                   dropConn,
+                                   onEvent,
+                                   protos[0])
+    debug "created new pubsub peer", peer
 
-  # create new pubsub peer
-  let pubSubPeer = newPubSubPeer(peer, getConn, dropConn, onEvent, protos[0])
-  debug "created new pubsub peer", peer
+    p.peers[peer] = pubSubPeer
+    pubSubPeer.observers = p.observers
 
-  p.peers[peer] = pubSubPeer
-  pubSubPeer.observers = p.observers
+    onNewPeer(p, pubSubPeer)
 
-  onNewPeer(p, pubSubPeer)
+    # metrics
+    libp2p_pubsub_peers.set(p.peers.len.int64)
 
-  # metrics
-  libp2p_pubsub_peers.set(p.peers.len.int64)
+    pubsubPeer.connect()
 
-  pubsubPeer.connect()
-
-  return pubSubPeer
+  return p.peers.getOrDefault(peer)
 
 proc handleData*(p: PubSub, topic: string, data: seq[byte]): Future[void] {.async.} =
   if topic notin p.topics: return # Not subscribed
@@ -357,7 +366,8 @@ method handleConn*(p: PubSub,
   finally:
     await conn.closeWithEOF()
 
-method subscribePeer*(p: PubSub, peer: PeerID) {.base.} =
+method subscribePeer*(p: PubSub, peer: PeerID)
+  {.base, raises: [Defect, DialFailedError].} =
   ## subscribe to remote peer to receive/send pubsub
   ## messages
   ##
@@ -368,7 +378,9 @@ proc updateTopicMetrics(p: PubSub, topic: string) =
   # metrics
   libp2p_pubsub_topics.set(p.topics.len.int64)
   if p.knownTopics.contains(topic):
-    libp2p_pubsub_topic_handlers.set(p.topics[topic].handler.len.int64, labelValues = [topic])
+    libp2p_pubsub_topic_handlers.set(
+      p.topics.getOrDefault(topic).handler.len.int64,
+      labelValues = [topic])
   else:
     libp2p_pubsub_topic_handlers.set(0, labelValues = ["other"])
     for key, val in p.topics:
@@ -423,11 +435,10 @@ method subscribe*(p: PubSub,
   ##               that will be triggered
   ##               on every received message
   ##
-  if topic notin p.topics:
-    trace "subscribing to topic", name = topic
-    p.topics[topic] = Topic(name: topic)
+  trace "subscribing to topic", name = topic
 
-  p.topics[topic].handler.add(handler)
+  p.topics.mgetOrPut(topic,
+    Topic(name: topic)).handler.add(handler)
 
   for _, peer in p.peers:
     p.sendSubs(peer, @[topic], true)
@@ -449,36 +460,41 @@ method publish*(p: PubSub,
 
   return 0
 
-method initPubSub*(p: PubSub) {.base.} =
+method initPubSub*(p: PubSub)
+  {.base, raises: [Defect, InitializationError].} =
   ## perform pubsub initialization
+  ##
+
   p.observers = new(seq[PubSubObserver])
   if p.msgIdProvider == nil:
     p.msgIdProvider = defaultMsgIdProvider
 
 method start*(p: PubSub) {.async, base.} =
   ## start pubsub
+  ##
+
   discard
 
 method stop*(p: PubSub) {.async, base.} =
   ## stopt pubsub
+  ##
+
   discard
 
 method addValidator*(p: PubSub,
                      topic: varargs[string],
                      hook: ValidatorHandler) {.base.} =
   for t in topic:
-    if t notin p.validators:
-      p.validators[t] = initHashSet[ValidatorHandler]()
-
+    p.validators.mgetOrPut(t,
+      initHashSet[ValidatorHandler]()).incl(hook)
     trace "adding validator for topic", topicId = t
-    p.validators[t].incl(hook)
 
 method removeValidator*(p: PubSub,
                         topic: varargs[string],
                         hook: ValidatorHandler) {.base.} =
   for t in topic:
-    if t in p.validators:
-      p.validators[t].excl(hook)
+    p.validators.withValue(t, validators):
+      validators[].excl(hook)
 
 method validate*(p: PubSub, message: Message): Future[ValidationResult] {.async, base.} =
   var pending: seq[Future[ValidationResult]]
@@ -519,7 +535,8 @@ proc init*[PubParams: object | bool](
   sign: bool = true,
   msgIdProvider: MsgIdProvider = defaultMsgIdProvider,
   subscriptionValidator: SubscriptionValidator = nil,
-  parameters: PubParams = false): P =
+  parameters: PubParams = false): P
+  {.raises: [Defect, InitializationError].} =
   let pubsub =
     when PubParams is bool:
       P(switch: switch,

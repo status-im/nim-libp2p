@@ -7,9 +7,12 @@
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
 
+{.push raises: [Defect].}
+
 ## This module implementes API for `go-libp2p-daemon`.
 import std/[os, osproc, strutils, tables, strtabs]
 import chronos, chronicles
+import chronos/selectors2 # TODO: workaround for missing `IOSelectorsException`
 import ../varint, ../multiaddress, ../multicodec, ../cid, ../peerid
 import ../wire, ../multihash, ../protobuf/minprotobuf, ../errors
 import ../crypto/crypto
@@ -147,10 +150,10 @@ type
     key*: PublicKey
 
   P2PStreamCallback* = proc(api: DaemonAPI,
-                            stream: P2PStream): Future[void] {.gcsafe.}
+                            stream: P2PStream): Future[void] {.gcsafe, raises: [Defect].}
   P2PPubSubCallback* = proc(api: DaemonAPI,
                             ticket: PubsubTicket,
-                            message: PubSubMessage): Future[bool] {.gcsafe.}
+                            message: PubSubMessage): Future[bool] {.gcsafe, raises: [Defect].}
 
   DaemonError* = object of LPError
   DaemonRemoteError* = object of DaemonError
@@ -468,7 +471,8 @@ proc checkResponse(pb: var ProtoBuffer): ResponseKind {.inline.} =
     else:
       result = ResponseKind.Error
 
-proc getErrorMessage(pb: var ProtoBuffer): string {.inline.} =
+proc getErrorMessage(pb: var ProtoBuffer): string
+  {.inline, raises: [Defect, DaemonLocalError].} =
   if pb.enterSubmessage() == cast[int](ResponseType.ERROR):
     if pb.getString(1, result) == -1:
       raise newException(DaemonLocalError, "Error message is missing!")
@@ -492,6 +496,8 @@ proc recvMessage(conn: StreamTransport): Future[seq[byte]] {.async.} =
     buffer.setLen(size)
     await conn.readExactly(addr buffer[0], int(size))
   except TransportIncompleteError:
+    buffer.setLen(0)
+  except IOSelectorsException:
     buffer.setLen(0)
 
   result = buffer
@@ -570,7 +576,8 @@ proc newDaemonApi*(flags: set[P2PDaemonFlags] = {},
                    gossipsubHeartbeatDelay = 0,
                    peersRequired = 2,
                    logFile = "",
-                   logLevel = IpfsLogLevel.Debug): Future[DaemonAPI] {.async.} =
+                   logLevel = IpfsLogLevel.Debug): Future[DaemonAPI]
+                   {.async, raises: [Defect, DaemonLocalError].} =
   ## Initialize connection to `go-libp2p-daemon` control socket.
   ##
   ## ``flags`` - set of P2PDaemonFlags.
@@ -750,7 +757,11 @@ proc newDaemonApi*(flags: set[P2PDaemonFlags] = {},
 
   # Starting daemon process
   # echo "Starting ", cmd, " ", args.join(" ")
-  api.process = startProcess(cmd, "", args, env, {poParentStreams})
+  try:
+    api.process = startProcess(cmd, "", args, env, {poParentStreams})
+  except Exception as exc:
+    raiseAssert(exc.msg)
+
   # Waiting until daemon will not be bound to control socket.
   while true:
     if not api.process.running():
@@ -826,7 +837,8 @@ proc transactMessage(transp: StreamTransport,
     raise newException(DaemonLocalError, "Incorrect or empty message received!")
   result = initProtoBuffer(message)
 
-proc getPeerInfo(pb: var ProtoBuffer): PeerInfo =
+proc getPeerInfo(pb: var ProtoBuffer): PeerInfo
+  {.raises: [Defect, DaemonLocalError].} =
   ## Get PeerInfo object from ``pb``.
   result.addresses = newSeq[MultiAddress]()
   if pb.getValue(1, result.peer) == -1:
@@ -835,7 +847,11 @@ proc getPeerInfo(pb: var ProtoBuffer): PeerInfo =
   while pb.getBytes(2, address) != -1:
     if len(address) != 0:
       var copyaddr = address
-      result.addresses.add(MultiAddress.init(copyaddr).tryGet())
+      let maRes = MultiAddress.init(copyaddr)
+      if maRes.isErr:
+        raise newException(DaemonLocalError, $maRes.error)
+
+      result.addresses.add(maRes.get())
       address.setLen(0)
 
 proc identity*(api: DaemonAPI): Future[PeerInfo] {.async.} =
@@ -875,7 +891,7 @@ proc disconnect*(api: DaemonAPI, peer: PeerID) {.async.} =
 
 proc openStream*(api: DaemonAPI, peer: PeerID,
                  protocols: seq[string],
-                 timeout = 0): Future[P2PStream] {.async.} =
+                 timeout = 0): Future[P2PStream] {.async, raises: [Defect].} =
   ## Open new stream to peer ``peer`` using one of the protocols in
   ## ``protocols``. Returns ``StreamTransport`` for the stream.
   var transp = await api.newConnection()
@@ -899,7 +915,7 @@ proc openStream*(api: DaemonAPI, peer: PeerID,
         stream.flags.incl(Outbound)
         stream.transp = transp
         result = stream
-  except Exception as exc:
+  except CatchableError as exc:
     await api.closeConnection(transp)
     raise exc
 
@@ -922,7 +938,7 @@ proc streamHandler(server: StreamServer, transp: StreamTransport) {.async.} =
   if len(stream.protocol) > 0:
     var handler = api.handlers.getOrDefault(stream.protocol)
     if not isNil(handler):
-      asyncCheck handler(api, stream)
+      asyncSpawn handler(api, stream)
 
 proc addHandler*(api: DaemonAPI, protocols: seq[string],
                  handler: P2PStreamCallback) {.async.} =
@@ -938,7 +954,7 @@ proc addHandler*(api: DaemonAPI, protocols: seq[string],
                                                                protocols))
     pb.withMessage() do:
       api.servers.add(P2PServer(server: server, address: maddress))
-  except Exception as exc:
+  except CatchableError as exc:
     for item in protocols:
       api.handlers.del(item)
     server.stop()
@@ -997,26 +1013,31 @@ proc cmTrimPeers*(api: DaemonAPI) {.async.} =
   finally:
     await api.closeConnection(transp)
 
-proc dhtGetSinglePeerInfo(pb: var ProtoBuffer): PeerInfo =
+proc dhtGetSinglePeerInfo(pb: var ProtoBuffer): PeerInfo
+  {.raises: [Defect, DaemonLocalError].} =
   if pb.enterSubmessage() == 2:
     result = pb.getPeerInfo()
   else:
     raise newException(DaemonLocalError, "Missing required field `peer`!")
 
-proc dhtGetSingleValue(pb: var ProtoBuffer): seq[byte] =
+proc dhtGetSingleValue(pb: var ProtoBuffer): seq[byte]
+  {.raises: [Defect, DaemonLocalError].} =
   result = newSeq[byte]()
   if pb.getLengthValue(3, result) == -1:
     raise newException(DaemonLocalError, "Missing field `value`!")
 
-proc dhtGetSinglePublicKey(pb: var ProtoBuffer): PublicKey =
+proc dhtGetSinglePublicKey(pb: var ProtoBuffer): PublicKey
+  {.raises: [Defect, DaemonLocalError].} =
   if pb.getValue(3, result) == -1:
     raise newException(DaemonLocalError, "Missing field `value`!")
 
-proc dhtGetSinglePeerID(pb: var ProtoBuffer): PeerID =
+proc dhtGetSinglePeerID(pb: var ProtoBuffer): PeerID
+  {.raises: [Defect, DaemonLocalError].} =
   if pb.getValue(3, result) == -1:
     raise newException(DaemonLocalError, "Missing field `value`!")
 
-proc enterDhtMessage(pb: var ProtoBuffer, rt: DHTResponseType) {.inline.} =
+proc enterDhtMessage(pb: var ProtoBuffer, rt: DHTResponseType)
+  {.inline, raises: [Defect, DaemonLocalError].} =
   var dtype: uint
   var res = pb.enterSubmessage()
   if res == cast[int](ResponseType.DHT):
@@ -1027,12 +1048,14 @@ proc enterDhtMessage(pb: var ProtoBuffer, rt: DHTResponseType) {.inline.} =
   else:
     raise newException(DaemonLocalError, "Wrong message type!")
 
-proc enterPsMessage(pb: var ProtoBuffer) {.inline.} =
+proc enterPsMessage(pb: var ProtoBuffer)
+  {.inline, raises: [Defect, DaemonLocalError].} =
   var res = pb.enterSubmessage()
   if res != cast[int](ResponseType.PUBSUB):
     raise newException(DaemonLocalError, "Wrong message type!")
 
-proc getDhtMessageType(pb: var ProtoBuffer): DHTResponseType {.inline.} =
+proc getDhtMessageType(pb: var ProtoBuffer): DHTResponseType
+  {.inline, raises: [Defect, DaemonLocalError].} =
   var dtype: uint
   if pb.getVarintValue(1, dtype) == 0:
     raise newException(DaemonLocalError, "Missing required DHT field `type`!")
@@ -1292,8 +1315,9 @@ proc pubsubLoop(api: DaemonAPI, ticket: PubsubTicket) {.async.} =
       await ticket.transp.join()
       break
 
-proc pubsubSubscribe*(api: DaemonAPI, topic: string,
-                   handler: P2PPubSubCallback): Future[PubsubTicket] {.async.} =
+proc pubsubSubscribe*(
+  api: DaemonAPI, topic: string,
+  handler: P2PPubSubCallback): Future[PubsubTicket] {.async.} =
   ## Subscribe to topic ``topic``.
   var transp = await api.newConnection()
   try:
@@ -1303,9 +1327,9 @@ proc pubsubSubscribe*(api: DaemonAPI, topic: string,
       ticket.topic = topic
       ticket.handler = handler
       ticket.transp = transp
-      asyncCheck pubsubLoop(api, ticket)
+      asyncSpawn pubsubLoop(api, ticket)
       result = ticket
-  except Exception as exc:
+  except CatchableError as exc:
     await api.closeConnection(transp)
     raise exc
 

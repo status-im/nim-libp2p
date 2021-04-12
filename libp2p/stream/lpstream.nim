@@ -7,6 +7,8 @@
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
 
+{.push raises: [Defect].}
+
 import std/oids
 import stew/byteutils
 import chronicles, chronos, metrics
@@ -15,12 +17,10 @@ import ../varint,
        ../multiaddress,
        ../errors
 
-export errors
+export errors, oids
 
 declareGauge(libp2p_open_streams,
   "open stream instances", labels = ["type", "dir"])
-
-export oids
 
 logScope:
   topics = "libp2p lpstream"
@@ -99,19 +99,19 @@ proc newLPStreamWriteError*(p: ref CatchableError): ref CatchableError =
   w.par = p
   result = w
 
-proc newLPStreamIncompleteError*(): ref CatchableError =
+proc newLPStreamIncompleteError*(): ref LPStreamIncompleteError =
   result = newException(LPStreamIncompleteError, "Incomplete data received")
 
-proc newLPStreamLimitError*(): ref CatchableError =
+proc newLPStreamLimitError*(): ref LPStreamLimitError =
   result = newException(LPStreamLimitError, "Buffer limit reached")
 
-proc newLPStreamIncorrectDefect*(m: string): ref Defect =
+proc newLPStreamIncorrectDefect*(m: string): ref LPStreamIncorrectDefect =
   result = newException(LPStreamIncorrectDefect, m)
 
-proc newLPStreamEOFError*(): ref CatchableError =
+proc newLPStreamEOFError*(): ref LPStreamEOFError =
   result = newException(LPStreamEOFError, "Stream EOF!")
 
-proc newLPStreamClosedError*(): ref Exception =
+proc newLPStreamClosedError*(): ref LPStreamClosedError =
   result = newException(LPStreamClosedError, "Stream Closed!")
 
 func shortLog*(s: LPStream): auto =
@@ -133,23 +133,25 @@ method initStream*(s: LPStream) {.base.} =
 proc join*(s: LPStream): Future[void] =
   s.closeEvent.wait()
 
-method closed*(s: LPStream): bool {.base, raises: [Defect].} =
+method closed*(s: LPStream): bool {.base.} =
   s.isClosed
 
-method atEof*(s: LPStream): bool {.base, raises: [Defect].} =
+method atEof*(s: LPStream): bool {.base.} =
   s.isEof
 
-method readOnce*(s: LPStream,
-                 pbytes: pointer,
-                 nbytes: int):
-                 Future[int]
-  {.base, async.} =
+method readOnce*(
+  s: LPStream,
+  pbytes: pointer,
+  nbytes: int): Future[int]
+  {.base, async, raises: [Defect, LPStreamEOFError].} =
   doAssert(false, "not implemented!")
 
-proc readExactly*(s: LPStream,
-                  pbytes: pointer,
-                  nbytes: int):
-                  Future[void] {.async.} =
+proc readExactly*(
+  s: LPStream,
+  pbytes: pointer,
+  nbytes: int): Future[void]
+  {.async, raises: [Defect, LPStreamEOFError, LPStreamIncompleteError].} =
+
   if s.atEof:
     raise newLPStreamEOFError()
 
@@ -178,7 +180,11 @@ proc readExactly*(s: LPStream,
 proc readLine*(s: LPStream,
                limit = 0,
                sep = "\r\n"): Future[string]
-               {.async, deprecated: "todo".} =
+               {.
+                  async,
+                  deprecated: "todo",
+                  raises: [Defect, LPStreamEOFError, LPStreamIncompleteError]
+               .} =
   # TODO replace with something that exploits buffering better
   var lim = if limit <= 0: -1 else: limit
   var state = 0
@@ -203,7 +209,8 @@ proc readLine*(s: LPStream,
       if len(result) == lim:
         break
 
-proc readVarint*(conn: LPStream): Future[uint64] {.async, gcsafe.} =
+proc readVarint*(conn: LPStream): Future[uint64]
+  {.async, gcsafe, raises: [Defect, InvalidVarintError].} =
   var
     varint: uint64
     length: int
@@ -219,7 +226,8 @@ proc readVarint*(conn: LPStream): Future[uint64] {.async, gcsafe.} =
   if true: # can't end with a raise apparently
     raise (ref InvalidVarintError)(msg: "Cannot parse varint")
 
-proc readLp*(s: LPStream, maxSize: int): Future[seq[byte]] {.async, gcsafe.} =
+proc readLp*(s: LPStream, maxSize: int): Future[seq[byte]]
+  {.async, gcsafe, raises: [Defect, LPStreamEOFError, MaxSizeError].} =
   ## read length prefixed msg, with the length encoded as a varint
   let
     length = await s.readVarint()
@@ -235,10 +243,12 @@ proc readLp*(s: LPStream, maxSize: int): Future[seq[byte]] {.async, gcsafe.} =
   await s.readExactly(addr res[0], res.len)
   return res
 
-method write*(s: LPStream, msg: seq[byte]): Future[void] {.base.} =
+method write*(s: LPStream, msg: seq[byte]): Future[void]
+  {.base, raises: [Defect, LPStreamClosedError].} =
   doAssert(false, "not implemented!")
 
-proc writeLp*(s: LPStream, msg: openArray[byte]): Future[void] =
+proc writeLp*(s: LPStream, msg: openArray[byte]): Future[void]
+  {.raises: [Defect, LPStreamClosedError].} =
   ## Write `msg` with a varint-encoded length prefix
   let vbytes = PB.toBytes(msg.len().uint64)
   var buf = newSeqUninitialized[byte](msg.len() + vbytes.len)
@@ -246,24 +256,29 @@ proc writeLp*(s: LPStream, msg: openArray[byte]): Future[void] =
   buf[vbytes.len..<buf.len] = msg
   s.write(buf)
 
-proc writeLp*(s: LPStream, msg: string): Future[void] =
+proc writeLp*(s: LPStream, msg: string): Future[void]
+  {.raises: [Defect, LPStreamClosedError].} =
   writeLp(s, msg.toOpenArrayByte(0, msg.high))
 
-proc write*(s: LPStream, pbytes: pointer, nbytes: int): Future[void] {.deprecated: "seq".} =
+proc write*(s: LPStream, pbytes: pointer, nbytes: int): Future[void]
+  {.deprecated: "seq", raises: [Defect, LPStreamClosedError].} =
   s.write(@(toOpenArray(cast[ptr UncheckedArray[byte]](pbytes), 0, nbytes - 1)))
 
-proc write*(s: LPStream, msg: string): Future[void] =
+proc write*(s: LPStream, msg: string): Future[void]
+  {.raises: [Defect, LPStreamClosedError].} =
   s.write(msg.toBytes())
 
-method closeImpl*(s: LPStream): Future[void] {.async, base.} =
+method closeImpl*(s: LPStream) {.base, async.} =
   ## Implementation of close - called only once
+  ##
+
   trace "Closing stream", s, objName = s.objName, dir = $s.dir
   s.closeEvent.fire()
   libp2p_open_streams.dec(labelValues = [s.objName, $s.dir])
   inc getStreamTracker(s.objName).closed
   trace "Closed stream", s, objName = s.objName, dir = $s.dir
 
-method close*(s: LPStream): Future[void] {.base, async.} = # {.raises [Defect].}
+method close*(s: LPStream) {.base, async.} = # {.raises [Defect].}
   ## close the stream - this may block, but will not raise exceptions
   ##
   if s.isClosed:
@@ -277,7 +292,7 @@ method close*(s: LPStream): Future[void] {.base, async.} = # {.raises [Defect].}
   # itself must implement this - once-only check as well, with their own field
   await closeImpl(s)
 
-proc closeWithEOF*(s: LPStream): Future[void] {.async.} =
+proc closeWithEOF*(s: LPStream) {.async.} =
   ## Close the stream and wait for EOF - use this with half-closed streams where
   ## an EOF is expected to arrive from the other end.
   ##

@@ -7,6 +7,8 @@
 ## This file may not be copied, modified, or distributed except according to
 ## those terms.
 
+{.push raises: [Defect].}
+
 import std/[options, tables, sequtils, sets]
 import chronos, chronicles, metrics
 import peerinfo,
@@ -27,7 +29,8 @@ const
 type
   TooManyConnectionsError* = object of LPError
 
-  ConnProvider* = proc(): Future[Connection] {.gcsafe, closure.}
+  ConnProvider* = proc(): Future[Connection]
+    {.gcsafe, closure, raises: [Defect].}
 
   ConnEventKind* {.pure.} = enum
     Connected,    # A connection was made and securely upgraded - there may be
@@ -45,7 +48,8 @@ type
       discard
 
   ConnEventHandler* =
-    proc(peerId: PeerID, event: ConnEvent): Future[void] {.gcsafe.}
+    proc(peerId: PeerID, event: ConnEvent): Future[void]
+      {.gcsafe, raises: [Defect].}
 
   PeerEventKind* {.pure.} = enum
     Left,
@@ -105,15 +109,34 @@ proc addConnEventHandler*(c: ConnManager,
   ## Add peer event handler - handlers must not raise exceptions!
   ##
 
-  if isNil(handler): return
-  c.connEvents.mgetOrPut(kind,
-    initOrderedSet[ConnEventHandler]()).incl(handler)
+  try:
+    if isNil(handler): return
+    c.connEvents.mgetOrPut(kind,
+      initOrderedSet[ConnEventHandler]()).incl(handler)
+  except Exception as exc:
+    # TODO: there is an Exception being raised
+    # somewhere in the depths of the std.
+    # Not sure what to do with it here, it seems
+    # like we should just quit right away because
+    # there is no way of telling what happened
+
+    raiseAssert exc.msg
 
 proc removeConnEventHandler*(c: ConnManager,
                              handler: ConnEventHandler,
                              kind: ConnEventKind) =
-  c.connEvents.withValue(kind, handlers) do:
-    handlers[].excl(handler)
+
+  try:
+    c.connEvents.withValue(kind, handlers) do:
+      handlers[].excl(handler)
+  except Exception as exc:
+    # TODO: there is an Exception being raised
+    # somewhere in the depths of the std.
+    # Not sure what to do with it here, it seems
+    # like we should just quit right away because
+    # there is no way of telling what happened
+
+    raiseAssert exc.msg
 
 proc triggerConnEvent*(c: ConnManager,
                        peerId: PeerID,
@@ -127,9 +150,7 @@ proc triggerConnEvent*(c: ConnManager,
         connEvents.add(h(peerId, event))
 
       checkFutures(await allFinished(connEvents))
-  except CancelledError as exc:
-    raise exc
-  except CatchableError as exc:
+  except LPError as exc:
     warn "Exception in triggerConnEvents",
       msg = exc.msg, peerId, event = $event
 
@@ -139,15 +160,33 @@ proc addPeerEventHandler*(c: ConnManager,
   ## Add peer event handler - handlers must not raise exceptions!
   ##
 
-  if isNil(handler): return
-  c.peerEvents.mgetOrPut(kind,
-    initOrderedSet[PeerEventHandler]()).incl(handler)
+  try:
+    if isNil(handler): return
+    c.peerEvents.mgetOrPut(kind,
+      initOrderedSet[PeerEventHandler]()).incl(handler)
+  except Exception as exc:
+    # TODO: there is an Exception being raised
+    # somewhere in the depths of the std.
+    # Not sure what to do with it here, it seems
+    # like we should just quit right away because
+    # there is no way of telling what happened
+
+    raiseAssert exc.msg
 
 proc removePeerEventHandler*(c: ConnManager,
                              handler: PeerEventHandler,
                              kind: PeerEventKind) =
-  c.peerEvents.withValue(kind, handlers) do:
-    handlers[].excl(handler)
+  try:
+    c.peerEvents.withValue(kind, handlers) do:
+      handlers[].excl(handler)
+  except Exception as exc:
+    # TODO: there is an Exception being raised
+    # somewhere in the depths of the std.
+    # Not sure what to do with it here, it seems
+    # like we should just quit right away because
+    # there is no way of telling what happened
+
+    raiseAssert exc.msg
 
 proc triggerPeerEvents*(c: ConnManager,
                         peerId: PeerID,
@@ -169,13 +208,14 @@ proc triggerPeerEvents*(c: ConnManager,
     trace "triggering peer events", peerId, event = $event
 
     var peerEvents: seq[Future[void]]
-    for h in c.peerEvents[event.kind]:
-      peerEvents.add(h(peerId, event))
+    try:
+      for h in c.peerEvents[event.kind]:
+        peerEvents.add(h(peerId, event))
+    except Exception as exc:
+      raiseAssert exc.msg
 
     checkFutures(await allFinished(peerEvents))
-  except CancelledError as exc:
-    raise exc
-  except CatchableError as exc: # handlers should not raise!
+  except LPError as exc: # handlers should not raise!
     warn "Exception in triggerPeerEvents", exc = exc.msg, peerId
 
 proc contains*(c: ConnManager, conn: Connection): bool =
@@ -209,7 +249,7 @@ proc contains*(c: ConnManager, muxer: Muxer): bool =
   if conn notin c.muxed:
     return
 
-  return muxer == c.muxed[conn].muxer
+  return muxer == c.muxed.getOrDefault(conn).muxer
 
 proc closeMuxerHolder(muxerHolder: MuxerHolder) {.async.} =
   trace "Cleaning up muxer", m = muxerHolder.muxer
@@ -225,9 +265,10 @@ proc closeMuxerHolder(muxerHolder: MuxerHolder) {.async.} =
 proc delConn(c: ConnManager, conn: Connection) =
   let peerId = conn.peerInfo.peerId
   if peerId in c.conns:
-    c.conns[peerId].excl(conn)
+    c.conns.withValue(peerId, conns):
+      conns[].excl(conn)
 
-    if c.conns[peerId].len == 0:
+    if c.conns.getOrDefault(peerId).len <= 0:
       c.conns.del(peerId)
 
     libp2p_peers.set(c.conns.len.int64)
@@ -271,8 +312,6 @@ proc onConnUpgraded(c: ConnManager, conn: Connection) {.async.} =
     await c.triggerConnEvent(
       peerId, ConnEvent(kind: ConnEventKind.Connected, incoming: conn.dir == Direction.In))
   except CatchableError as exc:
-    # This is top-level procedure which will work as separate task, so it
-    # do not need to propagate CancelledError and should handle other errors
     warn "Unexpected exception in switch peer connection cleanup",
       conn, msg = exc.msg
 
@@ -284,8 +323,6 @@ proc peerCleanup(c: ConnManager, conn: Connection) {.async.} =
       peerId, ConnEvent(kind: ConnEventKind.Disconnected))
     await c.triggerPeerEvents(peerId, PeerEvent(kind: PeerEventKind.Left))
   except CatchableError as exc:
-    # This is top-level procedure which will work as separate task, so it
-    # do not need to propagate CancelledError and should handle other errors
     warn "Unexpected exception peer cleanup handler",
       conn, msg = exc.msg
 
@@ -298,12 +335,8 @@ proc onClose(c: ConnManager, conn: Connection) {.async.} =
     await conn.join()
     trace "Connection closed, cleaning up", conn
     await c.cleanupConn(conn)
-  except CancelledError:
-    # This is top-level procedure which will work as separate task, so it
-    # do not need to propagate CancelledError.
-    debug "Unexpected cancellation in connection manager's cleanup", conn
   except CatchableError as exc:
-    debug "Unexpected exception in connection manager's cleanup",
+    debug "Exception in connection manager's cleanup",
           errMsg = exc.msg, conn
   finally:
     trace "Triggering peerCleanup", conn
@@ -342,22 +375,23 @@ proc selectMuxer*(c: ConnManager, conn: Connection): Muxer =
     return
 
   if conn in c.muxed:
-    return c.muxed[conn].muxer
+    return c.muxed.getOrDefault(conn).muxer
   else:
     debug "no muxer for connection", conn
 
-proc storeConn*(c: ConnManager, conn: Connection) =
+proc storeConn*(c: ConnManager, conn: Connection)
+  {.raises: [Defect, LPError].} =
   ## store a connection
   ##
 
   if isNil(conn):
-    raise newException(CatchableError, "Connection cannot be nil")
+    raise newException(LPError, "Connection cannot be nil")
 
   if conn.closed or conn.atEof:
-    raise newException(CatchableError, "Connection closed or EOF")
+    raise newException(LPStreamEOFError, "Connection closed or EOF")
 
   if isNil(conn.peerInfo):
-    raise newException(CatchableError, "Empty peer info")
+    raise newException(LPError, "Empty peer info")
 
   let peerId = conn.peerInfo.peerId
   if c.conns.getOrDefault(peerId).len > c.maxConnsPerPeer:
@@ -369,7 +403,10 @@ proc storeConn*(c: ConnManager, conn: Connection) =
   if peerId notin c.conns:
     c.conns[peerId] = initHashSet[Connection]()
 
-  c.conns[peerId].incl(conn)
+  c.conns.mgetOrPut(peerId,
+    initHashSet[Connection]()).incl(conn)
+
+  # c.conns.getOrDefault(peerId).incl(conn)
   libp2p_peers.set(c.conns.len.int64)
 
   # Launch on close listener
@@ -463,18 +500,18 @@ proc trackOutgoingConn*(c: ConnManager,
 
 proc storeMuxer*(c: ConnManager,
                  muxer: Muxer,
-                 handle: Future[void] = nil) =
+                 handle: Future[void] = nil) {.raises: [Defect, LPError].} =
   ## store the connection and muxer
   ##
 
   if isNil(muxer):
-    raise newException(CatchableError, "muxer cannot be nil")
+    raise newException(LPError, "muxer cannot be nil")
 
   if isNil(muxer.connection):
-    raise newException(CatchableError, "muxer's connection cannot be nil")
+    raise newException(LPError, "muxer's connection cannot be nil")
 
   if muxer.connection notin c:
-    raise newException(CatchableError, "cant add muxer for untracked connection")
+    raise newException(LPError, "cant add muxer for untracked connection")
 
   c.muxed[muxer.connection] = MuxerHolder(
     muxer: muxer,

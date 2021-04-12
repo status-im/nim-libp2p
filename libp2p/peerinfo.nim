@@ -62,8 +62,8 @@ template postInit(peerinfo: PeerInfo,
 proc init*(p: typedesc[PeerInfo],
            key: PrivateKey,
            addrs: openarray[MultiAddress] = [],
-           protocols: openarray[string] = []): PeerInfo {.
-           raises: [Defect, ResultError[cstring]].} =
+           protocols: openarray[string] = []): PeerInfo
+           {.raises: [Defect, ResultError[cstring]].} =
   result = PeerInfo(keyType: HasPrivate, peerId: PeerID.init(key).tryGet(),
                     privateKey: key)
   result.postInit(addrs, protocols)
