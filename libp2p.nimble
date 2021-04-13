@@ -13,6 +13,7 @@ requires "nim >= 1.2.0",
          "chronicles >= 0.7.2",
          "chronos >= 2.5.2",
          "asynctest >= 0.2.0 & <0.3.0",
+         "https://github.com/status-im/nim-quic.git",
          "metrics",
          "secp256k1",
          "stew#head"
