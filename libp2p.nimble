@@ -12,6 +12,7 @@ requires "nim >= 1.2.0",
          "bearssl >= 0.1.4",
          "chronicles >= 0.7.2",
          "chronos >= 2.5.2",
+         "asynctest >= 0.2.0 & <0.3.0",
          "metrics",
          "secp256k1",
          "stew#head"
