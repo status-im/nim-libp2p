@@ -20,6 +20,7 @@ else:
 
 const
   TRANSPMA* = mapOr(
+    QUIC,
     mapAnd(IP, mapEq("udp")),
     mapAnd(IP, mapEq("tcp")),
     mapAnd(mapEq("unix"))
@@ -67,7 +68,7 @@ proc initTAddress*(ma: MultiAddress): MaResult[TransportAddress] =
           res.port = Port(fromBytesBE(uint16, pbuf))
           ok(res)
   else:
-    err("MultiAddress must be wire address (tcp, udp or unix)")
+    err("MultiAddress must be wire address (tcp, udp, quic or unix)")
 
 proc connect*(
   ma: MultiAddress,
