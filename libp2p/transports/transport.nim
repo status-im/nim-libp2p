@@ -62,12 +62,12 @@ method accept*(self: Transport): Future[Session] {.base, async.} =
 
   doAssert false # not implemented
 
-method acceptStream*(self: Transport): Future[Connection]
-               {.base, gcsafe.} =
-  ## accept incoming connections
+proc acceptStream*(self: Transport): Future[Connection] {.async.} =
+  ## accept incoming session, and its first stream
   ##
 
-  discard
+  let session = await self.accept()
+  result = await session.getStream()
 
 method dial*(
   self: Transport,

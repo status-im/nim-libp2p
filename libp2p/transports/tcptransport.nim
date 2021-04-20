@@ -216,6 +216,11 @@ method stop*(self: TcpTransport) {.async, gcsafe.} =
         self.clients[Direction.In].mapIt(it.closeWait()) &
         self.clients[Direction.Out].mapIt(it.closeWait())))
 
+    checkFutures(
+      await allFinished(
+        self.sessions[Direction.In].mapIt(it.close()) &
+        self.sessions[Direction.Out].mapIt(it.close())))
+
     # server can be nil
     if not isNil(self.server):
       await self.server.closeWait()
@@ -251,30 +256,6 @@ method accept*(self: TcpTransport): Future[Session] {.async.} =
   try:
     let transp = await self.server.accept()
     return await self.sessionHandler(transp, Direction.In)
-  except TransportOsError as exc:
-    # TODO: it doesn't sound like all OS errors
-    # can  be ignored, we should re-raise those
-    # that can'self.
-    debug "OS Error", exc = exc.msg
-  except TransportTooManyError as exc:
-    debug "Too many files opened", exc = exc.msg
-  except TransportUseClosedError as exc:
-    debug "Server was closed", exc = exc.msg
-    raise newTransportClosedError(exc)
-  except CatchableError as exc:
-    warn "Unexpected error creating connection", exc = exc.msg
-    raise exc
-
-method acceptStream*(self: TcpTransport): Future[Connection] {.async, gcsafe.} =
-  ## accept a new TCP connection
-  ##
-
-  if not self.running:
-    raise newTransportClosedError()
-
-  try:
-    let transp = await self.server.accept()
-    return await self.connHandler(transp, Direction.In)
   except TransportOsError as exc:
     # TODO: it doesn't sound like all OS errors
     # can  be ignored, we should re-raise those
