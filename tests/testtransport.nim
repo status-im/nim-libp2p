@@ -79,7 +79,7 @@ suite "TCP transport":
 
     let ma: MultiAddress = MultiAddress.init(server.sock.getLocalAddress()).tryGet()
     let transport: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-    let conn = await transport.dial(ma)
+    let conn = await transport.dialStream(ma)
     var msg = newSeq[byte](6)
     await conn.readExactly(addr msg[0], 6)
     check string.fromBytes(msg) == "Hello!"
@@ -113,7 +113,7 @@ suite "TCP transport":
 
     let ma: MultiAddress = MultiAddress.init(server.sock.getLocalAddress()).tryGet()
     let transport: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-    let conn = await transport.dial(ma)
+    let conn = await transport.dialStream(ma)
     await conn.write("Hello!")
 
     await handlerWait.wait(1.seconds) # when no issues will not wait that long!
@@ -139,7 +139,7 @@ suite "TCP transport":
     let handlerWait = acceptHandler()
 
     let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-    let conn = await transport2.dial(transport1.ma)
+    let conn = await transport2.dialStream(transport1.ma)
     var msg = newSeq[byte](6)
     await conn.readExactly(addr msg[0], 6)
 
@@ -166,7 +166,7 @@ suite "TCP transport":
     let handlerWait = acceptHandler()
 
     let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-    let conn = await transport2.dial(transport1.ma)
+    let conn = await transport2.dialStream(transport1.ma)
     await conn.write("Hello!")
 
     await handlerWait.wait(1.seconds) # when no issues will not wait that long!
@@ -182,7 +182,7 @@ suite "TCP transport":
     await transport1.start(ma)
 
     let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-    let cancellation = transport2.dial(transport1.ma)
+    let cancellation = transport2.dialStream(transport1.ma)
 
     await cancellation.cancelAndWait()
     check cancellation.cancelled

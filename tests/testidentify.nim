@@ -65,7 +65,7 @@ suite "Identify":
         await msListen.handle(c)
 
       acceptFut = acceptHandler()
-      conn = await transport2.dial(transport1.ma)
+      conn = await transport2.dialStream(transport1.ma)
 
       discard await msDial.select(conn, IdentifyCodec)
       let id = await identifyProto2.identify(conn, remotePeerInfo)
@@ -88,7 +88,7 @@ suite "Identify":
         await msListen.handle(c)
 
       acceptFut = acceptHandler()
-      conn = await transport2.dial(transport1.ma)
+      conn = await transport2.dialStream(transport1.ma)
 
       discard await msDial.select(conn, IdentifyCodec)
       let id = await identifyProto2.identify(conn, remotePeerInfo)
@@ -114,7 +114,7 @@ suite "Identify":
           await conn.close()
 
       acceptFut = acceptHandler()
-      conn = await transport2.dial(transport1.ma)
+      conn = await transport2.dialStream(transport1.ma)
 
       expect IdentityNoMatchError:
         let pi2 = PeerInfo.init(PrivateKey.random(ECDSA, rng[]).get())

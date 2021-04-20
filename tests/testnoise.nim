@@ -107,7 +107,7 @@ suite "Noise":
       transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
       clientInfo = PeerInfo.init(PrivateKey.random(ECDSA, rng[]).get(), [transport1.ma])
       clientNoise = Noise.new(rng, clientInfo.privateKey, outgoing = true)
-      conn = await transport2.dial(transport1.ma)
+      conn = await transport2.dialStream(transport1.ma)
       sconn = await clientNoise.secure(conn, true)
 
     var msg = newSeq[byte](6)
@@ -147,7 +147,7 @@ suite "Noise":
       transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
       clientInfo = PeerInfo.init(PrivateKey.random(ECDSA, rng[]).get(), [transport1.ma])
       clientNoise = Noise.new(rng, clientInfo.privateKey, outgoing = true, commonPrologue = @[1'u8, 2'u8, 3'u8])
-      conn = await transport2.dial(transport1.ma)
+      conn = await transport2.dialStream(transport1.ma)
     var sconn: Connection = nil
     expect(NoiseDecryptTagError):
       sconn = await clientNoise.secure(conn, true)
@@ -183,7 +183,7 @@ suite "Noise":
       transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
       clientInfo = PeerInfo.init(PrivateKey.random(ECDSA, rng[]).get(), [transport1.ma])
       clientNoise = Noise.new(rng, clientInfo.privateKey, outgoing = true)
-      conn = await transport2.dial(transport1.ma)
+      conn = await transport2.dialStream(transport1.ma)
       sconn = await clientNoise.secure(conn, true)
 
     await sconn.write("Hello!")
@@ -222,7 +222,7 @@ suite "Noise":
       transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
       clientInfo = PeerInfo.init(PrivateKey.random(ECDSA, rng[]).get(), [transport1.ma])
       clientNoise = Noise.new(rng, clientInfo.privateKey, outgoing = true)
-      conn = await transport2.dial(transport1.ma)
+      conn = await transport2.dialStream(transport1.ma)
       sconn = await clientNoise.secure(conn, true)
 
     await sconn.writeLp(hugePayload)

@@ -69,7 +69,7 @@ proc acceptStream*(self: Transport): Future[Connection] {.async.} =
   let session = await self.accept()
   result = await session.getStream()
 
-method dial*(
+method dialStream*(
   self: Transport,
   address: MultiAddress): Future[Connection] {.base, gcsafe.} =
   ## dial a peer

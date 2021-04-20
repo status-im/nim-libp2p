@@ -397,7 +397,7 @@ suite "Mplex":
 
       let acceptFut = acceptHandler()
       let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-      let conn = await transport2.dial(transport1.ma)
+      let conn = await transport2.dialStream(transport1.ma)
 
       let mplexDial = Mplex.init(conn)
       let mplexDialFut = mplexDial.handle()
@@ -434,7 +434,7 @@ suite "Mplex":
 
       let acceptFut = acceptHandler()
       let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-      let conn = await transport2.dial(transport1.ma)
+      let conn = await transport2.dialStream(transport1.ma)
 
       let mplexDial = Mplex.init(conn)
       let stream = await mplexDial.newStream(lazy = true)
@@ -486,7 +486,7 @@ suite "Mplex":
 
       let acceptFut = acceptHandler()
       let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-      let conn = await transport2.dial(transport1.ma)
+      let conn = await transport2.dialStream(transport1.ma)
 
       let mplexDial = Mplex.init(conn)
       let mplexDialFut = mplexDial.handle()
@@ -523,7 +523,7 @@ suite "Mplex":
         await mplexListen.close()
 
       let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-      let conn = await transport2.dial(transport1.ma)
+      let conn = await transport2.dialStream(transport1.ma)
 
       let acceptFut = acceptHandler()
       let mplexDial = Mplex.init(conn)
@@ -565,7 +565,7 @@ suite "Mplex":
         await mplexListen.close()
 
       let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-      let conn = await transport2.dial(transport1.ma)
+      let conn = await transport2.dialStream(transport1.ma)
 
       let acceptFut = acceptHandler()
       let mplexDial = Mplex.init(conn)
@@ -610,7 +610,7 @@ suite "Mplex":
         await mplexListen.close()
 
       let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-      let conn = await transport2.dial(transport1.ma)
+      let conn = await transport2.dialStream(transport1.ma)
 
       let acceptFut = acceptHandler()
       let mplexDial = Mplex.init(conn)
@@ -658,7 +658,7 @@ suite "Mplex":
       await transport1.start(ma)
       let acceptFut = acceptHandler()
       let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-      let conn = await transport2.dial(transport1.ma)
+      let conn = await transport2.dialStream(transport1.ma)
 
       let mplexDial = Mplex.init(conn)
       let mplexDialFut = mplexDial.handle()
@@ -706,7 +706,7 @@ suite "Mplex":
       let acceptFut = acceptHandler()
 
       let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-      let conn = await transport2.dial(transport1.ma)
+      let conn = await transport2.dialStream(transport1.ma)
 
       let mplexDial = Mplex.init(conn)
       let mplexDialFut = mplexDial.handle()
@@ -765,7 +765,7 @@ suite "Mplex":
       let acceptFut = acceptHandler()
 
       let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-      let conn = await transport2.dial(transport1.ma)
+      let conn = await transport2.dialStream(transport1.ma)
 
       let mplexDial = Mplex.init(conn)
       let mplexDialFut = mplexDial.handle()
@@ -808,7 +808,7 @@ suite "Mplex":
       let acceptFut = acceptHandler()
 
       let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-      let conn = await transport2.dial(transport1.ma)
+      let conn = await transport2.dialStream(transport1.ma)
 
       let mplexDial = Mplex.init(conn)
       let mplexDialFut = mplexDial.handle()
@@ -852,7 +852,7 @@ suite "Mplex":
       let acceptFut = acceptHandler()
 
       let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-      let conn = await transport2.dial(transport1.ma)
+      let conn = await transport2.dialStream(transport1.ma)
 
       let mplexDial = Mplex.init(conn)
       let mplexDialFut = mplexDial.handle()
@@ -893,7 +893,7 @@ suite "Mplex":
       let acceptFut = acceptHandler()
 
       let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-      let conn = await transport2.dial(transport1.ma)
+      let conn = await transport2.dialStream(transport1.ma)
 
       let mplexDial = Mplex.init(conn)
       let mplexDialFut = mplexDial.handle()
@@ -936,7 +936,7 @@ suite "Mplex":
       let acceptFut = acceptHandler()
 
       let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-      let conn = await transport2.dial(transport1.ma)
+      let conn = await transport2.dialStream(transport1.ma)
 
       let mplexDial = Mplex.init(conn)
       let mplexDialFut = mplexDial.handle()
@@ -985,7 +985,7 @@ suite "Mplex":
           await mplexListen.close()
 
         let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-        let conn = await transport2.dial(transport1.ma)
+        let conn = await transport2.dialStream(transport1.ma)
 
         let acceptFut = acceptHandler()
         let mplexDial = Mplex.init(conn)
@@ -1054,7 +1054,7 @@ suite "Mplex":
           await mplexListen.close()
 
         let transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-        let conn = await transport2.dial(transport1.ma)
+        let conn = await transport2.dialStream(transport1.ma)
 
         let acceptFut = acceptHandler()
         let mplexDial = Mplex.init(conn)
