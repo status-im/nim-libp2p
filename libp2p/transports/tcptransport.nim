@@ -34,7 +34,6 @@ const
 type
   TcpTransport* = ref object of Transport
     server*: StreamServer
-    clients: array[Direction, seq[StreamTransport]]
     sessions: array[Direction, seq[TcpSession]]
     flags: set[ServerFlags]
 
@@ -111,56 +110,6 @@ proc sessionHandler*(self: TcpTransport,
 
   return session
 
-proc connHandler*(self: TcpTransport,
-                  client: StreamTransport,
-                  dir: Direction): Future[Connection] {.async.} =
-  var observedAddr: MultiAddress = MultiAddress()
-  try:
-    observedAddr = MultiAddress.init(client.remoteAddress).tryGet()
-  except CatchableError as exc:
-    trace "Connection setup failed", exc = exc.msg
-    if not(isNil(client) and client.closed):
-      await client.closeWait()
-      raise exc
-
-  trace "Handling tcp connection", address = $observedAddr,
-                                   dir = $dir,
-                                   clients = self.clients[Direction.In].len +
-                                   self.clients[Direction.Out].len
-
-  let conn = Connection(
-    ChronosStream.init(
-      client = client,
-      dir = dir,
-      observedAddr = observedAddr
-    ))
-
-  proc onClose() {.async.} =
-    try:
-      let futs = @[client.join(), conn.join()]
-      await futs[0] or futs[1]
-      for f in futs:
-        if not f.finished: await f.cancelAndWait() # cancel outstanding join()
-
-      trace "Cleaning up client", addrs = $client.remoteAddress,
-                                  conn
-
-      self.clients[dir].keepItIf( it != client )
-      await allFuturesThrowing(
-        conn.close(), client.closeWait())
-
-      trace "Cleaned up client", addrs = $client.remoteAddress,
-                                 conn
-
-    except CatchableError as exc:
-      let useExc {.used.} = exc
-      debug "Error cleaning up client", errMsg = exc.msg, conn
-
-  self.clients[dir].add(client)
-  asyncSpawn onClose()
-
-  return conn
-
 func init*(
   T: type TcpTransport,
   flags: set[ServerFlags] = {},
@@ -210,11 +159,6 @@ method stop*(self: TcpTransport) {.async, gcsafe.} =
   try:
     trace "Stopping TCP transport"
     await procCall Transport(self).stop() # call base
-
-    checkFutures(
-      await allFinished(
-        self.clients[Direction.In].mapIt(it.closeWait()) &
-        self.clients[Direction.Out].mapIt(it.closeWait())))
 
     checkFutures(
       await allFinished(
