@@ -61,7 +61,7 @@ suite "Identify":
       msListen.addHandler(IdentifyCodec, identifyProto1)
       serverFut = transport1.start(ma)
       proc acceptHandler(): Future[void] {.async, gcsafe.} =
-        let c = await transport1.accept()
+        let c = await transport1.acceptStream()
         await msListen.handle(c)
 
       acceptFut = acceptHandler()
@@ -84,7 +84,7 @@ suite "Identify":
       serverFut = transport1.start(ma)
 
       proc acceptHandler(): Future[void] {.async, gcsafe.} =
-        let c = await transport1.accept()
+        let c = await transport1.acceptStream()
         await msListen.handle(c)
 
       acceptFut = acceptHandler()
@@ -106,7 +106,7 @@ suite "Identify":
       proc acceptHandler() {.async.} =
         var conn: Connection
         try:
-          conn = await transport1.accept()
+          conn = await transport1.acceptStream()
           await msListen.handle(conn)
         except CatchableError:
           discard

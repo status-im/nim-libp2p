@@ -94,7 +94,7 @@ suite "Noise":
     asyncSpawn transport1.start(server)
 
     proc acceptHandler() {.async.} =
-      let conn = await transport1.accept()
+      let conn = await transport1.acceptStream()
       let sconn = await serverNoise.secure(conn, false)
       try:
         await sconn.write("Hello!")
@@ -135,7 +135,7 @@ suite "Noise":
     proc acceptHandler() {.async, gcsafe.} =
       var conn: Connection
       try:
-        conn = await transport1.accept()
+        conn = await transport1.acceptStream()
         discard await serverNoise.secure(conn, false)
       except CatchableError:
         discard
@@ -168,7 +168,7 @@ suite "Noise":
     asyncSpawn transport1.start(server)
 
     proc acceptHandler() {.async, gcsafe.} =
-      let conn = await transport1.accept()
+      let conn = await transport1.acceptStream()
       let sconn = await serverNoise.secure(conn, false)
       defer:
         await sconn.close()
@@ -209,7 +209,7 @@ suite "Noise":
       listenFut = transport1.start(server)
 
     proc acceptHandler() {.async, gcsafe.} =
-      let conn = await transport1.accept()
+      let conn = await transport1.acceptStream()
       let sconn = await serverNoise.secure(conn, false)
       defer:
         await sconn.close()

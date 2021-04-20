@@ -22,7 +22,7 @@ suite "TCP transport":
     asyncSpawn transport.start(ma)
 
     proc acceptHandler() {.async, gcsafe.} =
-      let conn = await transport.accept()
+      let conn = await transport.acceptStream()
       await conn.write("Hello!")
       await conn.close()
 
@@ -45,7 +45,7 @@ suite "TCP transport":
 
     proc acceptHandler() {.async, gcsafe.} =
       var msg = newSeq[byte](6)
-      let conn = await transport.accept()
+      let conn = await transport.acceptStream()
       await conn.readExactly(addr msg[0], 6)
       check string.fromBytes(msg) == "Hello!"
       await conn.close()
@@ -132,7 +132,7 @@ suite "TCP transport":
     await transport1.start(ma)
 
     proc acceptHandler() {.async, gcsafe.} =
-      let conn = await transport1.accept()
+      let conn = await transport1.acceptStream()
       await conn.write("Hello!")
       await conn.close()
 
@@ -157,7 +157,7 @@ suite "TCP transport":
     asyncSpawn transport1.start(ma)
 
     proc acceptHandler() {.async, gcsafe.} =
-      let conn = await transport1.accept()
+      let conn = await transport1.acceptStream()
       var msg = newSeq[byte](6)
       await conn.readExactly(addr msg[0], 6)
       check string.fromBytes(msg) == "Hello!"
@@ -196,7 +196,7 @@ suite "TCP transport":
     let transport1: TcpTransport = TcpTransport.init(upgrade = Upgrade())
     await transport1.start(ma)
 
-    let acceptHandler = transport1.accept()
+    let acceptHandler = transport1.acceptStream()
     await acceptHandler.cancelAndWait()
     check acceptHandler.cancelled
 

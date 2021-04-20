@@ -252,7 +252,7 @@ suite "Multistream select":
     asyncSpawn transport1.start(ma)
 
     proc acceptHandler(): Future[void] {.async, gcsafe.} =
-      let conn = await transport1.accept()
+      let conn = await transport1.acceptStream()
       await msListen.handle(conn)
       await conn.close()
 
@@ -299,7 +299,7 @@ suite "Multistream select":
     let listenFut = transport1.start(ma)
 
     proc acceptHandler(): Future[void] {.async, gcsafe.} =
-      let conn = await transport1.accept()
+      let conn = await transport1.acceptStream()
       try:
         await msListen.handle(conn)
       except LPStreamEOFError:
@@ -344,7 +344,7 @@ suite "Multistream select":
     asyncSpawn transport1.start(ma)
 
     proc acceptHandler(): Future[void] {.async, gcsafe.} =
-      let conn = await transport1.accept()
+      let conn = await transport1.acceptStream()
       await msListen.handle(conn)
 
     let acceptFut = acceptHandler()
@@ -382,7 +382,7 @@ suite "Multistream select":
     asyncSpawn transport1.start(ma)
 
     proc acceptHandler(): Future[void] {.async, gcsafe.} =
-      let conn = await transport1.accept()
+      let conn = await transport1.acceptStream()
       await msListen.handle(conn)
 
     let acceptFut = acceptHandler()

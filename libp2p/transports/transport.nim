@@ -56,7 +56,7 @@ method stop*(self: Transport): Future[void] {.base, async.} =
 
   discard
 
-method accept*(self: Transport): Future[Connection]
+method acceptStream*(self: Transport): Future[Connection]
                {.base, gcsafe.} =
   ## accept incoming connections
   ##

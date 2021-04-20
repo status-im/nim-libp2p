@@ -171,7 +171,7 @@ proc accept(s: Switch, transport: Transport) {.async.} = # noraises
       await upgrades.acquire()    # first wait for an upgrade slot to become available
       conn = await s.connManager  # next attempt to get an incoming connection
       .trackIncomingConn(
-        () => transport.accept()
+        () => transport.acceptStream()
       )
       if isNil(conn):
         # A nil connection means that we might have hit a

@@ -197,7 +197,7 @@ method upgradeOutgoing*(
 
   self.upgrader.upgradeOutgoing(conn)
 
-method accept*(self: TcpTransport): Future[Connection] {.async, gcsafe.} =
+method acceptStream*(self: TcpTransport): Future[Connection] {.async, gcsafe.} =
   ## accept a new TCP connection
   ##
 
