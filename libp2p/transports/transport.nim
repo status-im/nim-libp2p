@@ -69,13 +69,19 @@ proc acceptStream*(self: Transport): Future[Connection] {.async.} =
   let session = await self.accept()
   result = await session.getStream()
 
-method dialStream*(
-  self: Transport,
-  address: MultiAddress): Future[Connection] {.base, gcsafe.} =
+method dial*(self: Transport,
+             address: MultiAddress): Future[Session] {.base, async.} =
   ## dial a peer
+
+  doAssert false # not implemented
+
+proc dialStream*(self: Transport,
+                 address: MultiAddress): Future[Connection] {.async.} =
+  ## dial a peer, and get a first stream
   ##
 
-  discard
+  let session = await self.dial(address)
+  result = await session.getStream()
 
 method upgradeIncoming*(
   self: Transport,
