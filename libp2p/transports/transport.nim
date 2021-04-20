@@ -16,6 +16,7 @@ import ../stream/connection,
        ../multiaddress,
        ../multicodec,
        ../upgrademngrs/upgrade
+import ./session
 
 logScope:
   topics = "libp2p transport"
@@ -55,6 +56,11 @@ method stop*(self: Transport): Future[void] {.base, async.} =
   ##
 
   discard
+
+method accept*(self: Transport): Future[Session] {.base, async.} =
+  ## accept incoming session
+
+  doAssert false # not implemented
 
 method acceptStream*(self: Transport): Future[Connection]
                {.base, gcsafe.} =
