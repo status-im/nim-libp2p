@@ -79,5 +79,8 @@ task test_slim, "Runs the test suite":
   exec "nimble testinterop"
   exec "nimble testfilter"
 
+task test_fast, "Relatively quick sanity checks":
+  exec "nim c -r ./tests/testnative"
+
 task examples_build, "Build the samples":
   buildSample("directchat")
