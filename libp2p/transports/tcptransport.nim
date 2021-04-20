@@ -21,6 +21,7 @@ import transport,
        ../stream/connection,
        ../stream/chronosstream,
        ../upgrademngrs/upgrade
+import ./tcpsession
 
 logScope:
   topics = "libp2p tcptransport"
@@ -34,6 +35,7 @@ type
   TcpTransport* = ref object of Transport
     server*: StreamServer
     clients: array[Direction, seq[StreamTransport]]
+    sessions: array[Direction, seq[TcpSession]]
     flags: set[ServerFlags]
 
   TcpTransportTracker* = ref object of TrackerBase
@@ -63,6 +65,51 @@ proc setupTcpTransportTracker(): TcpTransportTracker =
   result.dump = dumpTracking
   result.isLeaked = leakTransport
   addTracker(TcpTransportTrackerName, result)
+
+proc sessionHandler*(self: TcpTransport,
+                     client: StreamTransport,
+                     dir: Direction): Future[Session] {.async.} =
+  var observedAddr: MultiAddress = MultiAddress()
+  try:
+    observedAddr = MultiAddress.init(client.remoteAddress).tryGet()
+  except CatchableError as exc:
+    trace "Connection setup failed", exc = exc.msg
+    if not(isNil(client) and client.closed):
+      await client.closeWait()
+      raise exc
+
+  trace "Handling tcp connection", address = $observedAddr,
+                                   dir = $dir,
+                                   sessions = self.sessions[Direction.In].len +
+                                   self.sessions[Direction.Out].len
+
+  let session = TcpSession.new(client, dir, observedAddr)
+
+  proc onClose() {.async.} =
+    try:
+      let futs = @[client.join(), session.join()]
+      await futs[0] or futs[1]
+      for f in futs:
+        if not f.finished: await f.cancelAndWait() # cancel outstanding join()
+
+      trace "Cleaning up client", addrs = $client.remoteAddress,
+                                  session
+
+      self.sessions[dir].keepItIf( it != session )
+      await allFuturesThrowing(
+        session.close(), client.closeWait())
+
+      trace "Cleaned up client", addrs = $client.remoteAddress,
+                                 session
+
+    except CatchableError as exc:
+      let useExc {.used.} = exc
+      debug "Error cleaning up client", errMsg = exc.msg, session
+
+  self.sessions[dir].add(session)
+  asyncSpawn onClose()
+
+  return session
 
 proc connHandler*(self: TcpTransport,
                   client: StreamTransport,
@@ -196,6 +243,27 @@ method upgradeOutgoing*(
   ##
 
   self.upgrader.upgradeOutgoing(conn)
+
+method accept*(self: TcpTransport): Future[Session] {.async.} =
+  if not self.running:
+    raise newTransportClosedError()
+
+  try:
+    let transp = await self.server.accept()
+    return await self.sessionHandler(transp, Direction.In)
+  except TransportOsError as exc:
+    # TODO: it doesn't sound like all OS errors
+    # can  be ignored, we should re-raise those
+    # that can'self.
+    debug "OS Error", exc = exc.msg
+  except TransportTooManyError as exc:
+    debug "Too many files opened", exc = exc.msg
+  except TransportUseClosedError as exc:
+    debug "Server was closed", exc = exc.msg
+    raise newTransportClosedError(exc)
+  except CatchableError as exc:
+    warn "Unexpected error creating connection", exc = exc.msg
+    raise exc
 
 method acceptStream*(self: TcpTransport): Future[Connection] {.async, gcsafe.} =
   ## accept a new TCP connection
