@@ -9,7 +9,7 @@
 
 {.push raises: [Defect].}
 
-import std/[oids, sequtils]
+import std/[oids, sequtils, os]
 import chronos, chronicles
 import transport,
        ../errors,
@@ -203,8 +203,10 @@ method accept*(self: TcpTransport): Future[Session] {.async.} =
   except TransportOsError as exc:
     # TODO: it doesn't sound like all OS errors
     # can  be ignored, we should re-raise those
-    # that can'self.
+    # that can't.
     debug "OS Error", exc = exc.msg
+    if defined(windows) and exc.code == OSErrorCode(64): # ERROR_NETNAME_DELETED
+      raise newTransportClosedError(exc)
   except TransportTooManyError as exc:
     debug "Too many files opened", exc = exc.msg
   except TransportUseClosedError as exc:
