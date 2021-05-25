@@ -18,6 +18,8 @@ import ../stream/connection,
        ../upgrademngrs/upgrade
 import ./session
 
+export session
+
 logScope:
   topics = "libp2p transport"
 
