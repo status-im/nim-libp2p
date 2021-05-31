@@ -14,6 +14,9 @@ suite "QUIC transport":
   setup:
     transport = QuicTransport.new()
 
+  teardown:
+    await transport.stop()
+
   test "handles QUIC addresses":
     let tcpAddress = MultiAddress.init("/ip4/127.0.0.1/tcp/45894").get()
     check transport.handles(address) == true

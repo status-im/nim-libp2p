@@ -37,6 +37,10 @@ method start*(transport: QuicTransport, address: MultiAddress) {.async.} =
   transport.listener = listen(initTAddress(address).tryGet)
   await procCall Transport(transport).start(address)
 
+method stop*(transport: QuicTransport) {.async.} =
+  await procCall Transport(transport).stop()
+  await transport.listener.stop()
+
 method accept*(transport: QuicTransport): Future[Session] {.async.} =
   doAssert not transport.listener.isNil, "call start() before calling accept()"
   let connection = await transport.listener.accept()
