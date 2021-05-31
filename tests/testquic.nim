@@ -53,3 +53,18 @@ suite "QUIC transport":
 
     await reading
 
+  test "reading stream caches incoming datagrams":
+    proc read {.async.} =
+      incoming stream:
+        var buffer: byte
+        for expected in '0'..'9':
+          await stream.readExactly(addr buffer, 1)
+          check char(buffer) == expected
+
+    let reading = read()
+
+    outgoing stream:
+      await stream.write("01234".toBytes())
+      await stream.write("56789".toBytes())
+
+    await reading

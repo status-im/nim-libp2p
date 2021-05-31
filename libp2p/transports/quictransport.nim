@@ -57,11 +57,12 @@ method readOnce*(stream: QuicStream,
     stream.cached = await stream.stream.read()
   if stream.cached.len <= nbytes:
     copyMem(pbytes, addr stream.cached[0], stream.cached.len)
-    return stream.cached.len
+    result = stream.cached.len
+    stream.cached = @[]
   else:
     copyMem(pbytes, addr stream.cached[0], nbytes)
+    result = nbytes
     stream.cached = stream.cached[nbytes..^1]
-    return nbytes
 
 method close*(stream: QuicStream) {.async.} =
   await stream.stream.close()
