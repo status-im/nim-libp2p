@@ -15,7 +15,8 @@ import chronicles, chronos, metrics
 import ../varint,
        ../peerinfo,
        ../multiaddress,
-       ../errors
+       ../errors,
+       ../utility
 
 export errors
 
@@ -57,34 +58,6 @@ type
 
   InvalidVarintError* = object of LPStreamError
   MaxSizeError* = object of LPStreamError
-
-  StreamTracker* = ref object of TrackerBase
-    opened*: uint64
-    closed*: uint64
-
-proc setupStreamTracker(name: string): StreamTracker =
-  let tracker = new StreamTracker
-
-  proc dumpTracking(): string {.gcsafe.} =
-    return "Opened " & tracker.id & ": " & $tracker.opened & "\n" &
-            "Closed " & tracker.id & ": " & $tracker.closed
-
-  proc leakTransport(): bool {.gcsafe.} =
-    return (tracker.opened != tracker.closed)
-
-  tracker.id = name
-  tracker.opened = 0
-  tracker.closed = 0
-  tracker.dump = dumpTracking
-  tracker.isLeaked = leakTransport
-  addTracker(name, tracker)
-
-  return tracker
-
-proc getStreamTracker(name: string): StreamTracker {.gcsafe.} =
-  result = cast[StreamTracker](getTracker(name))
-  if isNil(result):
-    result = setupStreamTracker(name)
 
 proc newLPStreamReadError*(p: ref CatchableError): ref LPStreamReadError =
   var w = newException(LPStreamReadError, "Read stream failed")
@@ -129,7 +102,7 @@ method initStream*(s: LPStream) {.base.} =
   s.oid = genOid()
 
   libp2p_open_streams.inc(labelValues = [s.objName, $s.dir])
-  inc getStreamTracker(s.objName).opened
+  inc getP2PTracker(s.objName).opened
   trace "Stream created", s, objName = s.objName, dir = $s.dir
 
 proc join*(s: LPStream): Future[void] =
@@ -265,7 +238,7 @@ method closeImpl*(s: LPStream): Future[void] {.async, base.} =
   ## Implementation of close - called only once
   trace "Closing stream", s, objName = s.objName, dir = $s.dir
   libp2p_open_streams.dec(labelValues = [s.objName, $s.dir])
-  inc getStreamTracker(s.objName).closed
+  inc getP2PTracker(s.objName).closed
   s.closeEvent.fire()
   trace "Closed stream", s, objName = s.objName, dir = $s.dir
 

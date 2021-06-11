@@ -8,9 +8,11 @@ import ../libp2p/crypto/crypto
 import ../libp2p/stream/lpstream
 import ../libp2p/muxers/mplex/lpchannel
 import ../libp2p/protocols/secure/secure
+import ../libp2p/utility
 
 import ./asyncunit
 export asyncunit
+export utility
 
 const
   StreamTransportTrackerName = "stream.transport"
@@ -46,6 +48,16 @@ template checkTrackers*() =
     if tracker.isLeaked():
       checkpoint tracker.dump()
       fail()
+  # Also test the GC is not fooling with us
+  GC_fullCollect()
+
+proc getSecondaryTracker*(): P2PSecondaryTracker =
+  getSecondaryTracker(trackerNames)
+
+template checkSecondaryTracker*(track: untyped): untyped =
+  if track.isLeaked():
+    checkpoint track.dump()
+    fail()
   # Also test the GC is not fooling with us
   GC_fullCollect()
 

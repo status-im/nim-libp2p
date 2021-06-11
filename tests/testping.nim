@@ -63,14 +63,23 @@ suite "Ping":
       proc acceptHandler(): Future[void] {.async, gcsafe.} =
         let c = await transport1.accept()
         await msListen.handle(c)
+        await c.close()
 
       acceptFut = acceptHandler()
+
+      let tracker = getSecondaryTracker()
+
       conn = await transport2.dial(transport1.ma)
 
       discard await msDial.select(conn, PingCodec)
       let time = await pingProto2.ping(conn)
 
       check not time.isZero()
+
+      await acceptFut
+      await sleepAsync(2.seconds)
+
+      checkSecondaryTracker(tracker)
 
     asyncTest "networked cancel ping":
       proc testPing(): Future[void] {.async.} =
