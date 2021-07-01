@@ -1,23 +1,26 @@
 when not(compileOption("threads")):
   {.fatal: "Please, compile this program with the --threads:on option!".}
 
-import tables, strformat, strutils
-import chronos
-import ../libp2p/[switch,
-                  multistream,
-                  crypto/crypto,
-                  protocols/identify,
-                  connection,
-                  transports/transport,
-                  transports/tcptransport,
-                  multiaddress,
-                  peerinfo,
-                  peerid,
-                  protocols/protocol,
-                  protocols/secure/secure,
-                  protocols/secure/secio,
-                  muxers/muxer,
-                  muxers/mplex/mplex]
+import tables, strformat, strutils, bearssl
+import chronos                              # an efficient library for async
+import ../libp2p/[switch,                   # manage transports, a single entry point for dialing and listening
+                  builders,                 # helper to build the switch object
+                  multistream,              # tag stream with short header to identify it
+                  multicodec,               # multicodec utilities
+                  crypto/crypto,            # cryptographic functions
+                  errors,                   # error handling utilities
+                  protocols/identify,       # identify the peer info of a peer
+                  stream/connection,        # create and close stream read / write connections
+                  transports/transport,     # listen and dial to other peers using p2p protocol
+                  transports/tcptransport,  # listen and dial to other peers using client-server protocol
+                  multiaddress,             # encode different addressing schemes. For example, /ip4/7.7.7.7/tcp/6543 means it is using IPv4 protocol and TCP
+                  peerinfo,                 # manage the information of a peer, such as peer ID and public / private key
+                  peerid,                   # Implement how peers interact
+                  protocols/protocol,       # define the protocol base type
+                  protocols/secure/secure,  # define the protocol of secure connection
+                  protocols/secure/secio,   # define the protocol of secure input / output, allows encrypted communication that uses public keys to validate signed messages instead of a certificate authority like in TLS
+                  muxers/muxer,             # define an interface for stream multiplexing, allowing peers to offer many protocols over a single connection
+                  muxers/mplex/mplex]       # define some contants and message types for stream multiplexing
 
 const ChatCodec = "/nim-libp2p/chat/1.0.0"
 const DefaultAddr = "/ip4/127.0.0.1/tcp/55505"
@@ -37,30 +40,32 @@ type ChatProto = ref object of LPProtocol
   connected: bool         # if the node is connected to another peer
   started: bool           # if the node has started
 
-# copied from https://github.com/status-im/nimbus-eth2/blob/0ed657e953740a92458f23033d47483ffa17ccb0/beacon_chain/eth2_network.nim#L109-L115
-proc initAddress(T: type MultiAddress, str: string): T =
-  let address = MultiAddress.init(str)
-  if IPFS.match(address) and matchPartial(multiaddress.TCP, address):
-    result = address
-  else:
-    raise newException(MultiAddressError,
-                         "Invalid bootstrap node multi-address")
-
-proc dialPeer(p: ChatProto, address: string) {.async.} =
-  let multiAddr = MultiAddress.initAddress(address);
-  let parts = address.split("/")
-  let remotePeer = PeerInfo.init(parts[^1],
-                                 [multiAddr])
-
-  echo &"dialing peer: {multiAddr}"
-  p.conn = await p.switch.dial(remotePeer, ChatCodec)
-  p.connected = true
-
 proc readAndPrint(p: ChatProto) {.async.} =
   while true:
-    while p.connected:
-      echo cast[string](await p.conn.readLp(1024))
+    var strData = await p.conn.readLp(1024)
+    strData &= '\0'.uint8
+    var str = cast[cstring](addr strdata[0])
+    echo $p.switch.peerInfo.peerId & ": " & $str
     await sleepAsync(100.millis)
+
+proc dialPeer(p: ChatProto, address: string) {.async.} =
+  let
+    multiAddr = MultiAddress.init(address).tryGet()
+    # split the peerId part /p2p/...
+    peerIdBytes = multiAddr[multiCodec("p2p")]
+      .tryGet()
+      .protoAddress()
+      .tryGet()
+    remotePeer = PeerID.init(peerIdBytes).tryGet()
+    # split the wire address
+    ip4Addr = multiAddr[multiCodec("ip4")].tryGet()
+    tcpAddr = multiAddr[multiCodec("tcp")].tryGet()
+    wireAddr = ip4Addr & tcpAddr
+
+  echo &"dialing peer: {multiAddr}"
+  p.conn = await p.switch.dial(remotePeer, @[wireAddr], ChatCodec)
+  p.connected = true
+  asyncSpawn p.readAndPrint()
 
 proc writeAndPrint(p: ChatProto) {.async.} =
   while true:
@@ -110,21 +115,31 @@ proc writeAndPrint(p: ChatProto) {.async.} =
         await p.conn.writeLp(line)
       else:
         try:
-          if line.startsWith("/") and "ipfs" in line:
+          if line.startsWith("/") and "p2p" in line:
             await p.dialPeer(line)
         except:
           echo &"unable to dial remote peer {line}"
           echo getCurrentExceptionMsg()
 
 proc readWriteLoop(p: ChatProto) {.async.} =
-  asyncSpawn p.writeAndPrint() # execute the async function but does not block
-  asyncSpawn p.readAndPrint()
+  await p.writeAndPrint()
 
-proc processInput(rfd: AsyncFD) {.async.} =
-  let transp = fromPipe(rfd)
-  while true:
-    let a = await transp.readLine()
-    echo "You just entered: " & a
+proc newChatProto(switch: Switch, transp: StreamTransport): ChatProto =
+  var chatproto = ChatProto(switch: switch, transp: transp, codecs: @[ChatCodec])
+
+  # create handler for incoming connection
+  proc handle(stream: Connection, proto: string) {.async.} =
+    if chatproto.connected and not chatproto.conn.closed:
+      echo "a chat session is already in progress - disconnecting!"
+      await stream.close()
+    else:
+      chatproto.conn = stream
+      chatproto.connected = true
+      await chatproto.readAndPrint()
+
+  # assign the new handler
+  chatproto.handler = handle
+  return chatproto
 
 proc readInput(wfd: AsyncFD) {.thread.} =
   ## This procedure performs reading from `stdin` and sends data over
@@ -135,7 +150,48 @@ proc readInput(wfd: AsyncFD) {.thread.} =
     let line = stdin.readLine()
     discard waitFor transp.write(line & "\r\n")
 
+proc processInput(rfd: AsyncFD, rng: ref BrHmacDrbgContext) {.async.} =
+  let transp = fromPipe(rfd)
+
+  let seckey = PrivateKey.random(RSA, rng[]).get()
+  var localAddress = DefaultAddr
+  while true:
+    echo &"Type an address to bind to or Enter to use the default {DefaultAddr}"
+    let a = await transp.readLine()
+    try:
+      if a.len > 0:
+        localAddress = a
+        break
+      # uise default
+      break
+    except:
+      echo "invalid address"
+      localAddress = DefaultAddr
+      continue
+
+  var switch = SwitchBuilder
+    .init()
+    .withRng(rng)
+    .withPrivateKey(seckey)
+    .withAddress(MultiAddress.init(localAddress).tryGet())
+    .build()
+
+  let chatProto = newChatProto(switch, transp)
+  switch.mount(chatProto)
+  let libp2pFuts = await switch.start()
+  chatProto.started = true
+
+  let id = $switch.peerInfo.peerId
+  echo "PeerID: " & id
+  echo "listening on: "
+  for a in switch.peerInfo.addrs:
+    echo &"{a}/p2p/{id}"
+
+  await chatProto.readWriteLoop()
+  await allFuturesThrowing(libp2pFuts)
+
 proc main() {.async.} =
+  let rng = newRng() # Singe random number source for the whole application
   let (rfd, wfd) = createAsyncPipe()
   if rfd == asyncInvalidPipe or wfd == asyncInvalidPipe:
     raise newException(ValueError, "Could not initialize pipe!")
@@ -143,7 +199,7 @@ proc main() {.async.} =
   var thread: Thread[AsyncFD]
   thread.createThread(readInput, wfd)
 
-  await processInput(rfd)
+  await processInput(rfd, rng)
 
-when isMainModule:      # isMainModule = true when the module is compiled as the main file
+when isMainModule: # isMainModule = true when the module is compiled as the main file
   waitFor(main())

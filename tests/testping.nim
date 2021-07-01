@@ -37,8 +37,8 @@ suite "Ping":
     asyncSetup:
       ma = Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()
 
-      transport1 = TcpTransport.init(upgrade = Upgrade())
-      transport2 = TcpTransport.init(upgrade = Upgrade())
+      transport1 = TcpTransport.new(upgrade = Upgrade())
+      transport2 = TcpTransport.new(upgrade = Upgrade())
 
       proc handlePing(peer: PeerInfo) {.async, gcsafe, closure.} =
         inc pingReceivedCount
@@ -76,8 +76,8 @@ suite "Ping":
       proc testPing(): Future[void] {.async.} =
         let baseMa = Multiaddress.init("/ip4/127.0.0.1/tcp/0").tryGet()
 
-        let transport: TcpTransport = TcpTransport.init(upgrade = Upgrade())
-        let transportdialer: TcpTransport = TcpTransport.init(upgrade = Upgrade())
+        let transport: TcpTransport = TcpTransport.new(upgrade = Upgrade())
+        let transportdialer: TcpTransport = TcpTransport.new(upgrade = Upgrade())
         asyncSpawn transport.start(baseMa)
 
         proc acceptHandler() {.async, gcsafe.} =

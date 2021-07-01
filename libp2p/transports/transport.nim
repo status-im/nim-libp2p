@@ -29,17 +29,10 @@ type
     ma*: Multiaddress
     running*: bool
     upgrader*: Upgrade
-    multicodec*: MultiCodec
 
 proc newTransportClosedError*(parent: ref Exception = nil): ref LPError =
   newException(TransportClosedError,
     "Transport closed, no more connections!", parent)
-
-method initTransport*(self: Transport) {.base, gcsafe, locks: "unknown".} =
-  ## perform protocol initialization
-  ##
-
-  discard
 
 method start*(
   self: Transport,
@@ -47,15 +40,17 @@ method start*(
   ## start the transport
   ##
 
-  self.ma = ma
   trace "starting transport", address = $ma
+  self.ma = ma
+  self.running = true
 
 method stop*(self: Transport): Future[void] {.base, async.} =
   ## stop and cleanup the transport
   ## including all outstanding connections
   ##
 
-  discard
+  trace "stopping transport", address = $self.ma
+  self.running = false
 
 method accept*(self: Transport): Future[Session] {.base, async.} =
   ## accept incoming session
@@ -90,7 +85,7 @@ method upgradeIncoming*(
   ## transport specific upgrades
   ##
 
-  doAssert(false, "Not implemented!")
+  self.upgrader.upgradeIncoming(conn)
 
 method upgradeOutgoing*(
   self: Transport,
@@ -99,7 +94,7 @@ method upgradeOutgoing*(
   ## transport specific upgrades
   ##
 
-  doAssert(false, "Not implemented!")
+  self.upgrader.upgradeOutgoing(conn)
 
 method handles*(
   self: Transport,
@@ -111,9 +106,3 @@ method handles*(
   # having to repeat the check in every transport
   if address.protocols.isOk:
     return address.protocols.get().filterIt( it == multiCodec("p2p-circuit") ).len == 0
-
-method localAddress*(self: Transport): MultiAddress {.base, gcsafe.} =
-  ## get the local address of the transport in case started with 0.0.0.0:0
-  ##
-
-  discard

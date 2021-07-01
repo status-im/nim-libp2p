@@ -38,13 +38,13 @@ Examples can be found in the [examples folder](https://github.com/status-im/nim-
 Try out the chat example. Full code can be found [here](https://github.com/status-im/nim-libp2p/blob/master/examples/chat.nim):
 
 ```bash
-nim c -r --threads:on examples\chat.nim
+nim c -r --threads:on examples/directchat.nim
 ```
 
 This will output a peer ID such as `QmbmHfVvouKammmQDJck4hz33WvVktNEe7pasxz2HgseRu` which you can use in another instance to connect to it.
 
 ```bash
-./example/chat
+./examples/directchat
 /connect QmbmHfVvouKammmQDJck4hz33WvVktNEe7pasxz2HgseRu
 ```
 

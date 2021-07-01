@@ -620,7 +620,7 @@ suite "Switch":
   asyncTest "e2e canceling dial should not leak":
     let ma: MultiAddress = Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()
 
-    let transport = TcpTransport.init(upgrade = Upgrade())
+    let transport = TcpTransport.new(upgrade = Upgrade())
     await transport.start(ma)
 
     proc acceptHandler() {.async, gcsafe.} =
@@ -657,7 +657,7 @@ suite "Switch":
   asyncTest "e2e closing remote conn should not leak":
     let ma: MultiAddress = Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()
 
-    let transport = TcpTransport.init(upgrade = Upgrade())
+    let transport = TcpTransport.new(upgrade = Upgrade())
     await transport.start(ma)
 
     proc acceptHandler() {.async, gcsafe.} =
@@ -713,7 +713,9 @@ suite "Switch":
       readers.add(closeReader())
 
     await allFuturesThrowing(readers)
-    await switch2.stop() #Otherwise this leeks
+    await switch2.stop() #Otherwise this leaks
+    check await checkExpiring(not switch1.isConnected(switch2.peerInfo.peerID))
+
     checkTracker(LPChannelTrackerName)
     checkTracker(SecureConnTrackerName)
     checkTracker(ChronosStreamTrackerName)

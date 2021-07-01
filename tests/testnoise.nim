@@ -68,7 +68,7 @@ proc createSwitch(ma: MultiAddress; outgoing: bool, secio: bool = false): (Switc
     connManager = ConnManager.init()
     ms = MultistreamSelect.new()
     muxedUpgrade = MuxedUpgrade.init(identify, muxers, secureManagers, connManager, ms)
-    transports = @[Transport(TcpTransport.init(upgrade = muxedUpgrade))]
+    transports = @[Transport(TcpTransport.new(upgrade = muxedUpgrade))]
 
   let switch = newSwitch(
       peerInfo,
@@ -90,7 +90,7 @@ suite "Noise":
       serverInfo = PeerInfo.init(PrivateKey.random(ECDSA, rng[]).get(), [server])
       serverNoise = Noise.new(rng, serverInfo.privateKey, outgoing = false)
 
-    let transport1: TcpTransport = TcpTransport.init(upgrade = Upgrade())
+    let transport1: TcpTransport = TcpTransport.new(upgrade = Upgrade())
     asyncSpawn transport1.start(server)
 
     proc acceptHandler() {.async.} =
@@ -104,7 +104,7 @@ suite "Noise":
 
     let
       acceptFut = acceptHandler()
-      transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
+      transport2: TcpTransport = TcpTransport.new(upgrade = Upgrade())
       clientInfo = PeerInfo.init(PrivateKey.random(ECDSA, rng[]).get(), [transport1.ma])
       clientNoise = Noise.new(rng, clientInfo.privateKey, outgoing = true)
       conn = await transport2.dialStream(transport1.ma)
@@ -128,7 +128,7 @@ suite "Noise":
       serverNoise = Noise.new(rng, serverInfo.privateKey, outgoing = false)
 
     let
-      transport1: TcpTransport = TcpTransport.init(upgrade = Upgrade())
+      transport1: TcpTransport = TcpTransport.new(upgrade = Upgrade())
 
     asyncSpawn transport1.start(server)
 
@@ -144,7 +144,7 @@ suite "Noise":
 
     let
       handlerWait = acceptHandler()
-      transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
+      transport2: TcpTransport = TcpTransport.new(upgrade = Upgrade())
       clientInfo = PeerInfo.init(PrivateKey.random(ECDSA, rng[]).get(), [transport1.ma])
       clientNoise = Noise.new(rng, clientInfo.privateKey, outgoing = true, commonPrologue = @[1'u8, 2'u8, 3'u8])
       conn = await transport2.dialStream(transport1.ma)
@@ -164,7 +164,7 @@ suite "Noise":
       serverNoise = Noise.new(rng, serverInfo.privateKey, outgoing = false)
       readTask = newFuture[void]()
 
-    let transport1: TcpTransport = TcpTransport.init(upgrade = Upgrade())
+    let transport1: TcpTransport = TcpTransport.new(upgrade = Upgrade())
     asyncSpawn transport1.start(server)
 
     proc acceptHandler() {.async, gcsafe.} =
@@ -180,7 +180,7 @@ suite "Noise":
 
     let
       acceptFut = acceptHandler()
-      transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
+      transport2: TcpTransport = TcpTransport.new(upgrade = Upgrade())
       clientInfo = PeerInfo.init(PrivateKey.random(ECDSA, rng[]).get(), [transport1.ma])
       clientNoise = Noise.new(rng, clientInfo.privateKey, outgoing = true)
       conn = await transport2.dialStream(transport1.ma)
@@ -205,7 +205,7 @@ suite "Noise":
     trace "Sending huge payload", size = hugePayload.len
 
     let
-      transport1: TcpTransport = TcpTransport.init(upgrade = Upgrade())
+      transport1: TcpTransport = TcpTransport.new(upgrade = Upgrade())
       listenFut = transport1.start(server)
 
     proc acceptHandler() {.async, gcsafe.} =
@@ -219,7 +219,7 @@ suite "Noise":
 
     let
       acceptFut = acceptHandler()
-      transport2: TcpTransport = TcpTransport.init(upgrade = Upgrade())
+      transport2: TcpTransport = TcpTransport.new(upgrade = Upgrade())
       clientInfo = PeerInfo.init(PrivateKey.random(ECDSA, rng[]).get(), [transport1.ma])
       clientNoise = Noise.new(rng, clientInfo.privateKey, outgoing = true)
       conn = await transport2.dialStream(transport1.ma)

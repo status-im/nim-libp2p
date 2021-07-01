@@ -169,7 +169,7 @@ proc build*(b: SwitchBuilder): Switch
     transports = block:
       var transports: seq[Transport]
       if b.tcpTransportOpts.enable:
-        transports.add(Transport(TcpTransport.init(b.tcpTransportOpts.flags, muxedUpgrade)))
+        transports.add(Transport(TcpTransport.new(b.tcpTransportOpts.flags, muxedUpgrade)))
       transports
 
   if b.secureManagers.len == 0:
