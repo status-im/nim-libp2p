@@ -447,8 +447,19 @@ proc trackIncomingConn*(c: ConnManager,
   var conn: Connection
   try:
     trace "Tracking incoming connection"
+    conn = await provider()
     await c.inSema.acquire()
-    conn = await c.trackConn(provider, c.inSema)
+
+    proc semaphoreMonitor() {.async.} =
+      try:
+        await conn.join()
+      except CatchableError as exc:
+        trace "Exception in semaphore monitor, ignoring", exc = exc.msg
+
+      c.inSema.release()
+
+    asyncSpawn semaphoreMonitor()
+
     if isNil(conn):
       trace "Couldn't acquire connection, releasing semaphore slot", dir = $Direction.In
       c.inSema.release()
