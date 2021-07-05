@@ -56,6 +56,8 @@ method init*(p: Ping) =
       raise exc
     except CatchableError as exc:
       trace "exception in ping handler", exc = exc.msg, conn
+    finally:
+      await conn.close()
 
   p.handler = handle
   p.codec = PingCodec
