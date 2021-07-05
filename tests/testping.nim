@@ -54,7 +54,7 @@ suite "Ping":
       await conn.close()
       await acceptFut
 
-      secondaryTracker.check()
+      secondaryTracker.checkSecondaryTracker()
       await transport1.stop()
       await serverFut
       await transport2.stop()

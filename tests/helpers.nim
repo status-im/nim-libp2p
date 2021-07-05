@@ -54,7 +54,7 @@ template checkTrackers*() =
 proc getSecondaryTracker*(): P2PSecondaryTracker =
   getSecondaryTracker(trackerNames)
 
-template check*(track: P2PSecondaryTracker): untyped =
+template checkSecondaryTracker*(track: untyped): untyped =
   if track.isLeaked():
     checkpoint track.dump()
     fail()
