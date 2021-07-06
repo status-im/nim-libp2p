@@ -68,3 +68,23 @@ suite "QUIC transport":
       await stream.write("56789".toBytes())
 
     await reading
+
+  test "writes to outgoing stream":
+    const message = "test".toBytes()
+
+    proc read {.async.} =
+      incoming stream:
+        var buffer: array[message.len, byte]
+        await stream.readExactly(addr buffer[0], buffer.len)
+        check @buffer == message
+
+    let reading = read()
+
+    let outgoing = QuicTransport.new()
+    let session = await outgoing.dial(address)
+    let stream = await session.getStream(Direction.Out)
+    await stream.write(message)
+    await stream.close()
+    await session.join()
+
+    await reading

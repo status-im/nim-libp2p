@@ -27,6 +27,11 @@ type
 func new*(_: type QuicTransport): QuicTransport =
   QuicTransport()
 
+proc new(_: type QuicStream, stream: Stream): QuicStream =
+  let quicstream = QuicStream(stream: stream)
+  procCall P2PConnection(quicstream).initStream()
+  quicstream
+
 method handles*(transport: QuicTransport, address: MultiAddress): bool =
   if not procCall Transport(transport).handles(address):
     return false
@@ -46,9 +51,20 @@ method accept*(transport: QuicTransport): Future[Session] {.async.} =
   let connection = await transport.listener.accept()
   return QuicSession(connection: connection)
 
-method getStream*(session: QuicSession): Future[P2PConnection] {.async.} =
-  let stream = await session.connection.incomingStream()
-  return QuicStream(stream: stream)
+method dial*(transport: QuicTransport,
+             address: MultiAddress): Future[Session] {.async.} =
+  let connection = await dial(initTAddress(address).tryGet)
+  result = QuicSession(connection: connection)
+
+method getStream*(session: QuicSession,
+                  direction = Direction.In): Future[P2PConnection] {.async.} =
+  var stream: Stream
+  case direction:
+    of Direction.In:
+      stream = await session.connection.incomingStream()
+    of Direction.Out:
+      stream = await session.connection.openStream()
+  return QuicStream.new(stream)
 
 method readOnce*(stream: QuicStream,
                  pbytes: pointer,
@@ -64,8 +80,17 @@ method readOnce*(stream: QuicStream,
     result = nbytes
     stream.cached = stream.cached[nbytes..^1]
 
-method close*(stream: QuicStream) {.async.} =
+{.push warning[LockLevel]: off.}
+method write*(stream: QuicStream, bytes: seq[byte]) {.async.} =
+  await stream.stream.write(bytes)
+{.pop.}
+
+method closeImpl*(stream: QuicStream) {.async.} =
   await stream.stream.close()
+  await procCall P2PConnection(stream).closeImpl()
 
 method close*(session: QuicSession) {.async.} =
   await session.connection.close()
+
+method join*(session: QuicSession) {.async.} =
+  await session.connection.waitClosed()
