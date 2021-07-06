@@ -21,7 +21,8 @@ proc new*(_: type TcpSession,
   )
   TcpSession(stream: stream)
 
-method getStream*(session: TcpSession): Future[Connection] {.async.} =
+method getStream*(session: TcpSession,
+                  direction = Direction.In): Future[Connection] {.async.} =
   result = session.stream
 
 method close*(session: TcpSession) {.async.} =

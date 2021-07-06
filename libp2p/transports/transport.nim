@@ -62,7 +62,7 @@ proc acceptStream*(self: Transport): Future[Connection] {.async.} =
   ##
 
   let session = await self.accept()
-  result = await session.getStream()
+  result = await session.getStream(Direction.In)
 
 method dial*(self: Transport,
              address: MultiAddress): Future[Session] {.base, async.} =
@@ -72,11 +72,11 @@ method dial*(self: Transport,
 
 proc dialStream*(self: Transport,
                  address: MultiAddress): Future[Connection] {.async.} =
-  ## dial a peer, and get a first stream
+  ## dial a peer, and open a first stream
   ##
 
   let session = await self.dial(address)
-  result = await session.getStream()
+  result = await session.getStream(Direction.Out)
 
 method upgradeIncoming*(
   self: Transport,

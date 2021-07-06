@@ -7,7 +7,9 @@ export connection
 type
   Session* = ref object of RootObj
 
-method getStream*(session: Session): Future[Connection] {.async, base.} =
+method getStream*(session: Session,
+                  direction = Direction.In):
+                  Future[Connection] {.async, base.} =
   doAssert false # not implemented
 
 method close*(session: Session) {.async, base.} =
