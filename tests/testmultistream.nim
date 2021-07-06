@@ -252,7 +252,7 @@ suite "Multistream select":
     asyncSpawn transport1.start(ma)
 
     proc acceptHandler(): Future[void] {.async, gcsafe.} =
-      let conn = await transport1.accept()
+      let conn = await transport1.acceptStream()
       await msListen.handle(conn)
       await conn.close()
 
@@ -260,7 +260,7 @@ suite "Multistream select":
 
     let msDial = MultistreamSelect.new()
     let transport2 = TcpTransport.new(upgrade = Upgrade())
-    let conn = await transport2.dial(transport1.ma)
+    let conn = await transport2.dialStream(transport1.ma)
 
     check (await msDial.select(conn, "/test/proto/1.0.0")) == true
 
@@ -299,7 +299,7 @@ suite "Multistream select":
     let listenFut = transport1.start(ma)
 
     proc acceptHandler(): Future[void] {.async, gcsafe.} =
-      let conn = await transport1.accept()
+      let conn = await transport1.acceptStream()
       try:
         await msListen.handle(conn)
       except LPStreamEOFError:
@@ -312,7 +312,7 @@ suite "Multistream select":
     let acceptFut = acceptHandler()
     let msDial = MultistreamSelect.new()
     let transport2: TcpTransport = TcpTransport.new(upgrade = Upgrade())
-    let conn = await transport2.dial(transport1.ma)
+    let conn = await transport2.dialStream(transport1.ma)
 
     let ls = await msDial.list(conn)
     let protos: seq[string] = @["/test/proto1/1.0.0", "/test/proto2/1.0.0"]
@@ -344,13 +344,13 @@ suite "Multistream select":
     asyncSpawn transport1.start(ma)
 
     proc acceptHandler(): Future[void] {.async, gcsafe.} =
-      let conn = await transport1.accept()
+      let conn = await transport1.acceptStream()
       await msListen.handle(conn)
 
     let acceptFut = acceptHandler()
     let msDial = MultistreamSelect.new()
     let transport2: TcpTransport = TcpTransport.new(upgrade = Upgrade())
-    let conn = await transport2.dial(transport1.ma)
+    let conn = await transport2.dialStream(transport1.ma)
 
     check (await msDial.select(conn,
       @["/test/proto/1.0.0", "/test/no/proto/1.0.0"])) == "/test/proto/1.0.0"
@@ -382,13 +382,13 @@ suite "Multistream select":
     asyncSpawn transport1.start(ma)
 
     proc acceptHandler(): Future[void] {.async, gcsafe.} =
-      let conn = await transport1.accept()
+      let conn = await transport1.acceptStream()
       await msListen.handle(conn)
 
     let acceptFut = acceptHandler()
     let msDial = MultistreamSelect.new()
     let transport2: TcpTransport = TcpTransport.new(upgrade = Upgrade())
-    let conn = await transport2.dial(transport1.ma)
+    let conn = await transport2.dialStream(transport1.ma)
 
     check (await msDial.select(conn,
       @[

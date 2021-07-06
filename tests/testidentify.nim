@@ -61,11 +61,11 @@ suite "Identify":
       msListen.addHandler(IdentifyCodec, identifyProto1)
       serverFut = transport1.start(ma)
       proc acceptHandler(): Future[void] {.async, gcsafe.} =
-        let c = await transport1.accept()
+        let c = await transport1.acceptStream()
         await msListen.handle(c)
 
       acceptFut = acceptHandler()
-      conn = await transport2.dial(transport1.ma)
+      conn = await transport2.dialStream(transport1.ma)
 
       discard await msDial.select(conn, IdentifyCodec)
       let id = await identifyProto2.identify(conn, remotePeerInfo)
@@ -84,11 +84,11 @@ suite "Identify":
       serverFut = transport1.start(ma)
 
       proc acceptHandler(): Future[void] {.async, gcsafe.} =
-        let c = await transport1.accept()
+        let c = await transport1.acceptStream()
         await msListen.handle(c)
 
       acceptFut = acceptHandler()
-      conn = await transport2.dial(transport1.ma)
+      conn = await transport2.dialStream(transport1.ma)
 
       discard await msDial.select(conn, IdentifyCodec)
       let id = await identifyProto2.identify(conn, remotePeerInfo)
@@ -106,7 +106,7 @@ suite "Identify":
       proc acceptHandler() {.async.} =
         var conn: Connection
         try:
-          conn = await transport1.accept()
+          conn = await transport1.acceptStream()
           await msListen.handle(conn)
         except CatchableError:
           discard
@@ -114,7 +114,7 @@ suite "Identify":
           await conn.close()
 
       acceptFut = acceptHandler()
-      conn = await transport2.dial(transport1.ma)
+      conn = await transport2.dialStream(transport1.ma)
 
       expect IdentityNoMatchError:
         let pi2 = PeerInfo.init(PrivateKey.random(ECDSA, rng[]).get())

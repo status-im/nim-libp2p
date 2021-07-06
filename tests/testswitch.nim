@@ -625,7 +625,7 @@ suite "Switch":
 
     proc acceptHandler() {.async, gcsafe.} =
       try:
-        let conn = await transport.accept()
+        let conn = await transport.acceptStream()
         discard await conn.readLp(100)
         await conn.close()
       except CatchableError:
@@ -661,7 +661,7 @@ suite "Switch":
     await transport.start(ma)
 
     proc acceptHandler() {.async, gcsafe.} =
-      let conn = await transport.accept()
+      let conn = await transport.acceptStream()
       await conn.closeWithEOF()
 
     let handlerWait = acceptHandler()

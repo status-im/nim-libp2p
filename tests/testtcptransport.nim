@@ -22,7 +22,7 @@ suite "TCP transport":
     asyncSpawn transport.start(ma)
 
     proc acceptHandler() {.async, gcsafe.} =
-      let conn = await transport.accept()
+      let conn = await transport.acceptStream()
       await conn.write("Hello!")
       await conn.close()
 
@@ -45,7 +45,7 @@ suite "TCP transport":
 
     proc acceptHandler() {.async, gcsafe.} =
       var msg = newSeq[byte](6)
-      let conn = await transport.accept()
+      let conn = await transport.acceptStream()
       await conn.readExactly(addr msg[0], 6)
       check string.fromBytes(msg) == "Hello!"
       await conn.close()
@@ -79,7 +79,7 @@ suite "TCP transport":
 
     let ma: MultiAddress = MultiAddress.init(server.sock.getLocalAddress()).tryGet()
     let transport: TcpTransport = TcpTransport.new(upgrade = Upgrade())
-    let conn = await transport.dial(ma)
+    let conn = await transport.dialStream(ma)
     var msg = newSeq[byte](6)
     await conn.readExactly(addr msg[0], 6)
     check string.fromBytes(msg) == "Hello!"
@@ -113,7 +113,7 @@ suite "TCP transport":
 
     let ma: MultiAddress = MultiAddress.init(server.sock.getLocalAddress()).tryGet()
     let transport: TcpTransport = TcpTransport.new(upgrade = Upgrade())
-    let conn = await transport.dial(ma)
+    let conn = await transport.dialStream(ma)
     await conn.write("Hello!")
 
     await handlerWait.wait(1.seconds) # when no issues will not wait that long!

@@ -16,6 +16,7 @@ import ../stream/connection,
        ../multiaddress,
        ../multicodec,
        ../upgrademngrs/upgrade
+import ./session
 
 logScope:
   topics = "libp2p transport"
@@ -51,20 +52,31 @@ method stop*(self: Transport): Future[void] {.base, async.} =
   trace "stopping transport", address = $self.ma
   self.running = false
 
-method accept*(self: Transport): Future[Connection]
-               {.base, gcsafe.} =
-  ## accept incoming connections
+method accept*(self: Transport): Future[Session] {.base, async.} =
+  ## accept incoming session
+
+  doAssert false # not implemented
+
+proc acceptStream*(self: Transport): Future[Connection] {.async.} =
+  ## accept incoming session, and its first stream
   ##
 
-  doAssert(false, "Not implemented!")
+  let session = await self.accept()
+  result = await session.getStream(Direction.In)
 
-method dial*(
-  self: Transport,
-  address: MultiAddress): Future[Connection] {.base, gcsafe.} =
+method dial*(self: Transport,
+             address: MultiAddress): Future[Session] {.base, async.} =
   ## dial a peer
+
+  doAssert false # not implemented
+
+proc dialStream*(self: Transport,
+                 address: MultiAddress): Future[Connection] {.async.} =
+  ## dial a peer, and open a first stream
   ##
 
-  doAssert(false, "Not implemented!")
+  let session = await self.dial(address)
+  result = await session.getStream(Direction.Out)
 
 method upgradeIncoming*(
   self: Transport,

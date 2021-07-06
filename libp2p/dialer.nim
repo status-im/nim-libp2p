@@ -65,7 +65,7 @@ proc dialAndUpgrade(
             # await a connection slot when the total
             # connection count is equal to `maxConns`
             await self.connManager.trackOutgoingConn(
-              () => transport.dial(address)
+              () => transport.dialStream(address)
             )
           except TooManyConnectionsError as exc:
             trace "Connection limit reached!"
