@@ -618,7 +618,7 @@ suite "Switch":
   # for most of the steps in the upgrade flow -
   # this is just a basic test for dials
   asyncTest "e2e canceling dial should not leak":
-    let ma: MultiAddress = Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()
+    let ma = @[Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()]
 
     let transport = TcpTransport.new(upgrade = Upgrade())
     await transport.start(ma)
@@ -638,7 +638,7 @@ suite "Switch":
     awaiters.add(await switch.start())
 
     var peerId = PeerID.init(PrivateKey.random(ECDSA, rng[]).get()).get()
-    let connectFut = switch.connect(peerId, @[transport.ma])
+    let connectFut = switch.connect(peerId, transport.addrs)
     await sleepAsync(500.millis)
     connectFut.cancel()
     await handlerWait
@@ -655,7 +655,7 @@ suite "Switch":
     await allFuturesThrowing(awaiters)
 
   asyncTest "e2e closing remote conn should not leak":
-    let ma: MultiAddress = Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()
+    let ma = @[Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()]
 
     let transport = TcpTransport.new(upgrade = Upgrade())
     await transport.start(ma)
@@ -672,7 +672,7 @@ suite "Switch":
 
     var peerId = PeerID.init(PrivateKey.random(ECDSA, rng[]).get()).get()
     expect LPStreamClosedError:
-      await switch.connect(peerId, @[transport.ma])
+      await switch.connect(peerId, transport.addrs)
 
     await handlerWait
 
@@ -903,3 +903,70 @@ suite "Switch":
 
       storedInfo1.protos.toSeq() == switch2.peerInfo.protocols
       storedInfo2.protos.toSeq() == switch1.peerInfo.protocols
+
+  asyncTest "e2e should allow multiple local addresses":
+    proc handle(conn: Connection, proto: string) {.async, gcsafe.} =
+      try:
+        let msg = string.fromBytes(await conn.readLp(1024))
+        check "Hello!" == msg
+        await conn.writeLp("Hello!")
+      finally:
+        await conn.close()
+
+    let testProto = new TestProto
+    testProto.codec = TestCodec
+    testProto.handler = handle
+
+    let addrs = @[MultiAddress.init("/ip4/127.0.0.1/tcp/0").tryGet(),
+                  MultiAddress.init("/ip6/::1/tcp/0").tryGet()]
+
+    let switch1 = newStandardSwitch(
+      addrs = addrs,
+      transportFlags = {ServerFlags.ReuseAddr, ServerFlags.ReusePort})
+
+    switch1.mount(testProto)
+
+    let switch2 = newStandardSwitch()
+    let switch3 = newStandardSwitch(
+      addrs = MultiAddress.init("/ip4/127.0.0.1/tcp/0").tryGet()
+    )
+
+    await allFuturesThrowing(
+      switch1.start(),
+      switch2.start(),
+      switch3.start())
+
+    check IP4.matchPartial(switch1.peerInfo.addrs[0])
+    check IP6.matchPartial(switch1.peerInfo.addrs[1])
+
+    let conn = await switch2.dial(
+      switch1.peerInfo.peerId,
+      @[switch1.peerInfo.addrs[0]],
+      TestCodec)
+
+    check switch1.isConnected(switch2.peerInfo.peerId)
+    check switch2.isConnected(switch1.peerInfo.peerId)
+
+    await conn.writeLp("Hello!")
+    check "Hello!" == string.fromBytes(await conn.readLp(1024))
+    await conn.close()
+
+    let connv6 = await switch3.dial(
+      switch1.peerInfo.peerId,
+      @[switch1.peerInfo.addrs[1]],
+      TestCodec)
+
+    check switch1.isConnected(switch3.peerInfo.peerId)
+    check switch3.isConnected(switch1.peerInfo.peerId)
+
+    await connv6.writeLp("Hello!")
+    check "Hello!" == string.fromBytes(await connv6.readLp(1024))
+    await connv6.close()
+
+    await allFuturesThrowing(
+      switch1.stop(),
+      switch2.stop(),
+      switch3.stop())
+
+    check not switch1.isConnected(switch2.peerInfo.peerId)
+    check not switch2.isConnected(switch1.peerInfo.peerId)

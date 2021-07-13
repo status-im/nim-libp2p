@@ -17,7 +17,7 @@ suite "TCP transport":
     checkTrackers()
 
   asyncTest "test listener: handle write":
-    let ma: MultiAddress = Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()
+    let ma = @[Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()]
     let transport: TcpTransport = TcpTransport.new(upgrade = Upgrade())
     asyncSpawn transport.start(ma)
 
@@ -28,7 +28,7 @@ suite "TCP transport":
 
     let handlerWait = acceptHandler()
 
-    let streamTransport = await connect(transport.ma)
+    let streamTransport = await connect(transport.addrs[0])
 
     let msg = await streamTransport.read(6)
 
@@ -38,7 +38,7 @@ suite "TCP transport":
     check string.fromBytes(msg) == "Hello!"
 
   asyncTest "test listener: handle read":
-    let ma: MultiAddress = Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()
+    let ma = @[Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()]
 
     let transport: TcpTransport = TcpTransport.new(upgrade = Upgrade())
     asyncSpawn transport.start(ma)
@@ -51,7 +51,7 @@ suite "TCP transport":
       await conn.close()
 
     let handlerWait = acceptHandler()
-    let streamTransport: StreamTransport = await connect(transport.ma)
+    let streamTransport: StreamTransport = await connect(transport.addrs[0])
     let sent = await streamTransport.write("Hello!")
 
     await handlerWait.wait(1.seconds) # when no issues will not wait that long!

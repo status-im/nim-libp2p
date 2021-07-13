@@ -11,6 +11,7 @@
 
 import std/[tables,
             options,
+            sequtils,
             sets,
             oids,
             sugar,
@@ -207,17 +208,28 @@ proc start*(s: Switch): Future[seq[Future[void]]] {.async, gcsafe.} =
   trace "starting switch for peer", peerInfo = s.peerInfo
   var startFuts: seq[Future[void]]
   for t in s.transports: # for each transport
-    for i, a in s.peerInfo.addrs:
-      if t.handles(a): # check if it handles the multiaddr
-        var server = t.start(a)
-        s.peerInfo.addrs[i] = t.ma # update peer's address
-        s.acceptFuts.add(s.accept(t))
-        startFuts.add(server)
+    let addrs = s.peerInfo.addrs.filterIt(
+      t.handles(it)
+    )
 
-  proc peerIdentifiedHandler(peerInfo: PeerInfo, event: PeerEvent) {.async.} =
+    s.peerInfo.addrs.keepItIf(
+      it notin addrs
+    )
+
+    if addrs.len > 0:
+      let server = t.start(addrs)
+      s.peerInfo.addrs &= t.addrs
+      s.acceptFuts.add(s.accept(t))
+      startFuts.add(server)
+
+  proc peerIdentifiedHandler(
+    peerInfo: PeerInfo,
+    event: PeerEvent) {.async.} =
     s.peerStore.replace(peerInfo)
 
-  s.connManager.addPeerEventHandler(peerIdentifiedHandler, PeerEventKind.Identified)
+  s.connManager.addPeerEventHandler(
+    peerIdentifiedHandler,
+    PeerEventKind.Identified)
 
   debug "Started libp2p node", peer = s.peerInfo
   return startFuts # listen for incoming connections

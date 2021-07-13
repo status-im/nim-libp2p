@@ -22,7 +22,7 @@ suite "Identify":
 
   suite "handle identify message":
     var
-      ma {.threadvar.}: MultiAddress
+      ma {.threadvar.}: seq[MultiAddress]
       remoteSecKey {.threadvar.}: PrivateKey
       remotePeerInfo {.threadvar.}: PeerInfo
       serverFut {.threadvar.}: Future[void]
@@ -36,10 +36,12 @@ suite "Identify":
       conn {.threadvar.}: Connection
 
     asyncSetup:
-      ma = Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()
+      ma = @[Multiaddress.init("/ip4/0.0.0.0/tcp/0").tryGet()]
       remoteSecKey = PrivateKey.random(ECDSA, rng[]).get()
       remotePeerInfo = PeerInfo.init(
-        remoteSecKey, [ma], ["/test/proto1/1.0.0", "/test/proto2/1.0.0"])
+        remoteSecKey,
+        ma,
+        ["/test/proto1/1.0.0", "/test/proto2/1.0.0"])
 
       transport1 = TcpTransport.new(upgrade = Upgrade())
       transport2 = TcpTransport.new(upgrade = Upgrade())
@@ -65,13 +67,13 @@ suite "Identify":
         await msListen.handle(c)
 
       acceptFut = acceptHandler()
-      conn = await transport2.dial(transport1.ma)
+      conn = await transport2.dial(transport1.addrs[0])
 
       discard await msDial.select(conn, IdentifyCodec)
       let id = await identifyProto2.identify(conn, remotePeerInfo)
 
       check id.pubKey.get() == remoteSecKey.getKey().get()
-      check id.addrs[0] == ma
+      check id.addrs == ma
       check id.protoVersion.get() == ProtoVersion
       check id.agentVersion.get() == AgentVersion
       check id.protos == @["/test/proto1/1.0.0", "/test/proto2/1.0.0"]
@@ -88,13 +90,13 @@ suite "Identify":
         await msListen.handle(c)
 
       acceptFut = acceptHandler()
-      conn = await transport2.dial(transport1.ma)
+      conn = await transport2.dial(transport1.addrs[0])
 
       discard await msDial.select(conn, IdentifyCodec)
       let id = await identifyProto2.identify(conn, remotePeerInfo)
 
       check id.pubKey.get() == remoteSecKey.getKey().get()
-      check id.addrs[0] == ma
+      check id.addrs == ma
       check id.protoVersion.get() == ProtoVersion
       check id.agentVersion.get() == customAgentVersion
       check id.protos == @["/test/proto1/1.0.0", "/test/proto2/1.0.0"]
@@ -114,7 +116,7 @@ suite "Identify":
           await conn.close()
 
       acceptFut = acceptHandler()
-      conn = await transport2.dial(transport1.ma)
+      conn = await transport2.dial(transport1.addrs[0])
 
       expect IdentityNoMatchError:
         let pi2 = PeerInfo.init(PrivateKey.random(ECDSA, rng[]).get())
@@ -142,7 +144,10 @@ suite "Identify":
       awaiters.add(await switch1.start())
       awaiters.add(await switch2.start())
 
-      conn = await switch2.dial(switch1.peerInfo.peerId, switch1.peerInfo.addrs, IdentifyPushCodec)
+      conn = await switch2.dial(
+        switch1.peerInfo.peerId,
+        switch1.peerInfo.addrs,
+        IdentifyPushCodec)
 
       let storedInfo1 = switch1.peerStore.get(switch2.peerInfo.peerId)
       let storedInfo2 = switch2.peerStore.get(switch1.peerInfo.peerId)

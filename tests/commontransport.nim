@@ -16,7 +16,7 @@ proc commonTransportTest*(transportType: typedesc[Transport], ma: string) =
     teardown:
       checkTrackers()
     asyncTest "e2e: handle write":
-      let ma: MultiAddress = Multiaddress.init(ma).tryGet()
+      let ma = @[Multiaddress.init(ma).tryGet()]
 
       let transport1: transportType = transportType.new(upgrade = Upgrade())
       await transport1.start(ma)
@@ -29,7 +29,7 @@ proc commonTransportTest*(transportType: typedesc[Transport], ma: string) =
       let handlerWait = acceptHandler()
 
       let transport2: transportType = transportType.new(upgrade = Upgrade())
-      let conn = await transport2.dial(transport1.ma)
+      let conn = await transport2.dial(transport1.addrs[0])
       var msg = newSeq[byte](6)
       await conn.readExactly(addr msg[0], 6)
 
@@ -42,7 +42,7 @@ proc commonTransportTest*(transportType: typedesc[Transport], ma: string) =
       check string.fromBytes(msg) == "Hello!"
 
     asyncTest "e2e: handle read":
-      let ma: MultiAddress = Multiaddress.init(ma).tryGet()
+      let ma = @[Multiaddress.init(ma).tryGet()]
       let transport1: transportType = transportType.new(upgrade = Upgrade())
       asyncSpawn transport1.start(ma)
 
@@ -56,7 +56,7 @@ proc commonTransportTest*(transportType: typedesc[Transport], ma: string) =
       let handlerWait = acceptHandler()
 
       let transport2: transportType = transportType.new(upgrade = Upgrade())
-      let conn = await transport2.dial(transport1.ma)
+      let conn = await transport2.dial(transport1.addrs[0])
       await conn.write("Hello!")
 
       await conn.close() #for some protocols, closing requires actively, so we must close here
@@ -66,13 +66,13 @@ proc commonTransportTest*(transportType: typedesc[Transport], ma: string) =
       await transport1.stop()
 
     asyncTest "e2e: handle dial cancellation":
-      let ma: MultiAddress = Multiaddress.init(ma).tryGet()
+      let ma = @[Multiaddress.init(ma).tryGet()]
 
       let transport1: transportType = transportType.new(upgrade = Upgrade())
       await transport1.start(ma)
 
       let transport2: transportType = transportType.new(upgrade = Upgrade())
-      let cancellation = transport2.dial(transport1.ma)
+      let cancellation = transport2.dial(transport1.addrs[0])
 
       await cancellation.cancelAndWait()
       check cancellation.cancelled
@@ -81,7 +81,7 @@ proc commonTransportTest*(transportType: typedesc[Transport], ma: string) =
       await transport1.stop()
 
     asyncTest "e2e: handle accept cancellation":
-      let ma: MultiAddress = Multiaddress.init(ma).tryGet()
+      let ma = @[Multiaddress.init(ma).tryGet()]
 
       let transport1: transportType = transportType.new(upgrade = Upgrade())
       await transport1.start(ma)
@@ -90,4 +90,51 @@ proc commonTransportTest*(transportType: typedesc[Transport], ma: string) =
       await acceptHandler.cancelAndWait()
       check acceptHandler.cancelled
 
+      await transport1.stop()
+
+    asyncTest "e2e should allow multiple local addresses":
+      let addrs = @[MultiAddress.init(ma).tryGet(),
+                    MultiAddress.init(ma).tryGet()]
+
+
+      let transport1 = transportType.new(upgrade = Upgrade())
+      await transport1.start(addrs)
+
+      proc acceptHandler() {.async, gcsafe.} =
+        while true:
+          let conn = await transport1.accept()
+          await conn.write("Hello!")
+          await conn.close()
+
+      let handlerWait = acceptHandler()
+
+      check transport1.addrs.len == 2
+      check transport1.addrs[0] != transport1.addrs[1]
+
+      var msg = newSeq[byte](6)
+
+      proc client(ma: MultiAddress) {.async.} =
+        let conn1 = await transport1.dial(ma)
+        await conn1.readExactly(addr msg[0], 6)
+        check string.fromBytes(msg) == "Hello!"
+        await conn1.close()
+
+      #Dial the same server multiple time in a row
+      await client(transport1.addrs[0])
+      await client(transport1.addrs[0])
+      await client(transport1.addrs[0])
+
+      #Dial the same server on different addresses
+      await client(transport1.addrs[1])
+      await client(transport1.addrs[0])
+      await client(transport1.addrs[1])
+
+      #Cancel a dial
+      let
+        dial1 = transport1.dial(transport1.addrs[1])
+        dial2 = transport1.dial(transport1.addrs[0])
+      await dial1.cancelAndWait()
+      await dial2.cancelAndWait()
+
+      await handlerWait.cancelAndWait()
       await transport1.stop()
