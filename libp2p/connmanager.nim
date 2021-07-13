@@ -24,7 +24,7 @@ declareGauge(libp2p_peers, "total connected peers")
 
 const
   MaxConnections* = 50
-  MaxConnectionsPerPeer* = 5
+  MaxConnectionsPerPeer* = 2
 
 type
   TooManyConnectionsError* = object of LPError
