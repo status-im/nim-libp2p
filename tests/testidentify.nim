@@ -41,8 +41,8 @@ suite "Identify":
       remotePeerInfo = PeerInfo.init(
         remoteSecKey, [ma], ["/test/proto1/1.0.0", "/test/proto2/1.0.0"])
 
-      transport1 = TcpTransport.init(upgrade = Upgrade())
-      transport2 = TcpTransport.init(upgrade = Upgrade())
+      transport1 = TcpTransport.new(upgrade = Upgrade())
+      transport2 = TcpTransport.new(upgrade = Upgrade())
 
       identifyProto1 = Identify.new(remotePeerInfo)
       identifyProto2 = Identify.new(remotePeerInfo)

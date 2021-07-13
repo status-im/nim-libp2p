@@ -1,6 +1,12 @@
 name: nim-libp2p codecov builds
 
-on: [push, pull_request]
+on:
+  #On push to common branches, this computes the "bases stats" for PRs
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
 
 jobs:
   GossipSub:

@@ -45,7 +45,7 @@ chronicles.formatIt(ChronosStream): shortLog(it)
 
 method initStream*(s: ChronosStream) =
   if s.objName.len == 0:
-    s.objName = "ChronosStream"
+    s.objName = ChronosStreamTrackerName
 
   s.timeoutHandler = proc() {.async, gcsafe.} =
     trace "Idle timeout expired, closing ChronosStream", s

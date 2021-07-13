@@ -37,10 +37,13 @@ proc len*(vb: VBuffer): int =
   doAssert(result >= 0)
 
 proc isLiteral[T](s: seq[T]): bool {.inline.} =
-  type
-    SeqHeader = object
-      length, reserved: int
-  (cast[ptr SeqHeader](s).reserved and (1 shl (sizeof(int) * 8 - 2))) != 0
+  when defined(gcOrc) or defined(gcArc):
+    false
+  else:
+    type
+      SeqHeader = object
+        length, reserved: int
+    (cast[ptr SeqHeader](s).reserved and (1 shl (sizeof(int) * 8 - 2))) != 0
 
 proc initVBuffer*(data: seq[byte], offset = 0): VBuffer =
   ## Initialize VBuffer with shallow copy of ``data``.

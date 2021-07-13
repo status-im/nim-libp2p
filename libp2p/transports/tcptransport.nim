@@ -114,21 +114,25 @@ proc connHandler*(self: TcpTransport,
 
   return conn
 
-func init*(
-  T: type TcpTransport,
+proc init*(
+  T: typedesc[TcpTransport],
+  flags: set[ServerFlags] = {},
+  upgrade: Upgrade): T {.deprecated: "use .new".} =
+
+  T.new(flags, upgrade)
+
+proc new*(
+  T: typedesc[TcpTransport],
   flags: set[ServerFlags] = {},
   upgrade: Upgrade): T =
 
-  result = T(
+  let transport = T(
     flags: flags,
     upgrader: upgrade
   )
 
-  result.initTransport()
-
-method initTransport*(self: TcpTransport) =
-  self.multicodec = multiCodec("tcp")
   inc getTcpTransportTracker().opened
+  return transport
 
 method start*(
   self: TcpTransport,
@@ -150,15 +154,12 @@ method start*(
 
   # always get the resolved address in case we're bound to 0.0.0.0:0
   self.ma = MultiAddress.init(self.server.sock.getLocalAddress()).tryGet()
-  self.running = true
 
   trace "Listening on", address = self.ma
 
 method stop*(self: TcpTransport) {.async, gcsafe.} =
   ## stop the transport
   ##
-
-  self.running = false # mark stopped as soon as possible
 
   try:
     trace "Stopping TCP transport"
@@ -178,24 +179,6 @@ method stop*(self: TcpTransport) {.async, gcsafe.} =
     inc getTcpTransportTracker().closed
   except CatchableError as exc:
     trace "Error shutting down tcp transport", exc = exc.msg
-
-method upgradeIncoming*(
-  self: TcpTransport,
-  conn: Connection): Future[void] {.gcsafe.} =
-  ## base upgrade method that the transport uses to perform
-  ## transport specific upgrades
-  ##
-
-  self.upgrader.upgradeIncoming(conn)
-
-method upgradeOutgoing*(
-  self: TcpTransport,
-  conn: Connection): Future[Connection] {.gcsafe.} =
-  ## base upgrade method that the transport uses to perform
-  ## transport specific upgrades
-  ##
-
-  self.upgrader.upgradeOutgoing(conn)
 
 method accept*(self: TcpTransport): Future[Connection] {.async, gcsafe.} =
   ## accept a new TCP connection
