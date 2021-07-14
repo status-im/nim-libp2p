@@ -19,16 +19,17 @@ else:
   import posix
 
 const
-  TRANSPMA* = mapOr(
-    mapAnd(IP, mapEq("udp")),
-    mapAnd(IP, mapEq("tcp")),
-    mapAnd(mapEq("unix"))
+  RTRANSPMA* = mapOr(
+    TCP,
+    WebSockets,
+    UNIX
   )
 
-  RTRANSPMA* = mapOr(
-    mapAnd(IP, mapEq("tcp")),
-    mapAnd(mapEq("unix"))
+  TRANSPMA* = mapOr(
+    RTRANSPMA,
+    UDP
   )
+
 
 proc initTAddress*(ma: MultiAddress): MaResult[TransportAddress] =
   ## Initialize ``TransportAddress`` with MultiAddress ``ma``.

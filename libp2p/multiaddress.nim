@@ -363,6 +363,9 @@ const
       mcodec: multiCodec("ws"), kind: Marker, size: 0
     ),
     MAProtocol(
+      mcodec: multiCodec("wss"), kind: Marker, size: 0
+    ),
+    MAProtocol(
       mcodec: multiCodec("ipfs"), kind: Length, size: 0,
       coder: TranscoderP2P
     ),
@@ -411,6 +414,9 @@ const
   UTP* = mapAnd(UDP, mapEq("utp"))
   QUIC* = mapAnd(UDP, mapEq("quic"))
   UNIX* = mapEq("unix")
+  WS* = mapAnd(TCP, mapEq("ws"))
+  WSS* = mapAnd(TCP, mapEq("wss"))
+  WebSockets* = mapOr(WS, WSS)
 
   Unreliable* = mapOr(UDP)
 
@@ -978,11 +984,14 @@ proc matchPart(pat: MaPattern, protos: seq[MultiCodec]): MaPatResult =
   var empty: seq[MultiCodec]
   var pcs = protos
   if pat.operator == Or:
+    result = MaPatResult(flag: false, rem: empty)
     for a in pat.args:
       let res = a.matchPart(pcs)
       if res.flag:
-        return MaPatResult(flag: true, rem: res.rem)
-    result = MaPatResult(flag: false, rem: empty)
+        #Greedy Or
+        if result.flag == false or
+             result.rem.len > res.rem.len:
+          result = res
   elif pat.operator == And:
     if len(pcs) < len(pat.args):
       return MaPatResult(flag: false, rem: empty)

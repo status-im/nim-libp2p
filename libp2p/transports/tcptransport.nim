@@ -218,8 +218,4 @@ method dial*(
 method handles*(t: TcpTransport, address: MultiAddress): bool {.gcsafe.} =
   if procCall Transport(t).handles(address):
     if address.protocols.isOk:
-      return address.protocols
-        .get()
-        .filterIt(
-          it == multiCodec("tcp")
-        ).len > 0
+      return TCP.match(address)
