@@ -20,6 +20,8 @@ import dial,
        connmanager,
        stream/connection,
        transports/transport,
+       nameresolving/nameresolver,
+       wire,
        errors
 
 export dial, errors
@@ -41,6 +43,7 @@ type
     connManager: ConnManager
     dialLock: Table[PeerID, AsyncLock]
     transports: seq[Transport]
+    resolver*: NameResolver
 
 proc dialAndUpgrade(
   self: Dialer,
@@ -54,9 +57,15 @@ proc dialAndUpgrade(
     transport: Transport
     address: MultiAddress
 
+  let resolvedAddrs = 
+    if isNil(self.resolver):
+      addrs
+    else:
+      await self.resolver.resolveMAddresses(addrs)
+
   for t in self.transports: # for each transport
     transport = t
-    for a in addrs:      # for each address
+    for a in resolvedAddrs:      # for each address
       address = a
       if t.handles(a):   # check if it can dial it
         trace "Dialing address", address = $a, peerId
@@ -79,7 +88,7 @@ proc dialAndUpgrade(
             continue # Try the next address
 
         # make sure to assign the peer to the connection
-        dialed.peerInfo = PeerInfo.init(peerId, addrs)
+        dialed.peerInfo = PeerInfo.init(peerId, resolvedAddrs)
 
         # also keep track of the connection's bottom unsafe transport direction
         # required by gossipsub scoring
@@ -234,9 +243,11 @@ proc new*(
   peerInfo: PeerInfo,
   connManager: ConnManager,
   transports: seq[Transport],
-  ms: MultistreamSelect): Dialer =
+  ms: MultistreamSelect,
+  resolver: NameResolver=nil): Dialer =
 
   T(peerInfo: peerInfo,
     connManager: connManager,
     transports: transports,
-    ms: ms)
+    ms: ms,
+    resolver: resolver)

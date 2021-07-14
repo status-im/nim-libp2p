@@ -16,6 +16,7 @@ import
   muxers/[muxer, mplex/mplex],
   protocols/[identify, secure/secure, secure/noise],
   connmanager, upgrademngrs/muxedupgrade,
+  nameresolving/nameresolver,
   errors
 
 export
@@ -47,6 +48,7 @@ type
     maxConnsPerPeer: int
     protoVersion: string
     agentVersion: string
+    nameResolver: NameResolver
 
 proc new*(T: type[SwitchBuilder]): T =
 
@@ -130,6 +132,10 @@ proc withAgentVersion*(b: SwitchBuilder, agentVersion: string): SwitchBuilder =
   b.agentVersion = agentVersion
   b
 
+proc withNameResolver*(b: SwitchBuilder, nameResolver: NameResolver): SwitchBuilder =
+  b.nameResolver = nameResolver
+  b
+
 proc build*(b: SwitchBuilder): Switch
   {.raises: [Defect, LPError].} =
 
@@ -185,7 +191,8 @@ proc build*(b: SwitchBuilder): Switch
     muxers = muxers,
     secureManagers = secureManagerInstances,
     connManager = connManager,
-    ms = ms)
+    ms = ms,
+    nameResolver = b.nameResolver)
 
   return switch
 

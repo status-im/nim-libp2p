@@ -53,6 +53,10 @@ const
     "/ip4/1.2.3.4/tcp/80/unix/a/b/c/d/e/f",
     "/ip4/127.0.0.1/ipfs/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC/tcp/1234/unix/stdio",
     "/ip4/127.0.0.1/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC/tcp/1234/unix/stdio",
+    "/dns/example.io/udp/65535",
+    "/dns4/example.io/udp/65535",
+    "/dns6/example.io/udp/65535",
+    "/dnsaddr/example.io/udp/65535",
   ]
 
   FailureVectors = [
@@ -200,6 +204,10 @@ const
     "/ip6/::/tcp/65535",
     "/ip6/::/udp/65535",
     "/ip6/::/udp/65535",
+    "/dns/example.io/tcp/65535",
+    "/dns4/example.io/tcp/65535",
+    "/dns6/example.io/tcp/65535",
+    "/dnsaddr/example.io/tcp/65535",
     "/unix/tmp/test.socket"
   ]
 
@@ -257,7 +265,7 @@ const
       ]
     ),
     PatternVector(pattern: DNS,
-      good: @["/dnsaddr/example.io", "/dns4/example.io", "/dns6/example.io"],
+      good: @["/dns/example.io", "/dnsaddr/example.io", "/dns4/example.io", "/dns6/example.io"],
       bad: @["/ip4/127.0.0.1"],
     ),
     PatternVector(pattern: WebRTCDirect,
