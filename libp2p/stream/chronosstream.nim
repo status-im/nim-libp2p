@@ -33,6 +33,8 @@ when defined(libp2p_agents_metrics):
   declareCounter(libp2p_peers_traffic_read, "incoming traffic", labels = ["agent"])
   declareCounter(libp2p_peers_traffic_write, "outgoing traffic", labels = ["agent"])
 
+declareCounter(libp2p_network_bytes, "total traffic", labels = ["direction"])
+
 func shortLog*(conn: ChronosStream): auto =
   try:
     if conn.isNil: "ChronosStream(nil)"
@@ -105,6 +107,7 @@ method readOnce*(s: ChronosStream, pbytes: pointer, nbytes: int): Future[int] {.
   withExceptions:
     result = await s.client.readOnce(pbytes, nbytes)
     s.activity = true # reset activity flag
+    libp2p_network_bytes.inc(nbytes.int64, labelValues = ["in"])
     when defined(libp2p_agents_metrics):
       s.trackPeerIdentity()
       if s.tracked:
@@ -127,6 +130,7 @@ method write*(s: ChronosStream, msg: seq[byte]) {.async.} =
       raise (ref LPStreamClosedError)(msg: "Write couldn't finish writing")
 
     s.activity = true # reset activity flag
+    libp2p_network_bytes.inc(msg.len.int64, labelValues = ["out"])
     when defined(libp2p_agents_metrics):
       s.trackPeerIdentity()
       if s.tracked:

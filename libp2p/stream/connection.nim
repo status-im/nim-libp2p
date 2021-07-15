@@ -36,6 +36,7 @@ type
     peerInfo*: PeerInfo
     observedAddr*: Multiaddress
     upgraded*: Future[void]
+    tag*: string                    # debug tag for metrics (generally ms protocol)
     transportDir*: Direction        # The bottom level transport (generally the socket) direction
 
 proc timeoutMonitor(s: Connection) {.async, gcsafe.}

@@ -21,6 +21,9 @@ export connection
 logScope:
   topics = "libp2p mplexchannel"
 
+when defined(lipp2p_network_protocols_metrics):
+  declareCounter libp2p_protocols_bytes, "total sent or received bytes", ["protocol", "direction"]
+
 ## Channel half-closed states
 ##
 ## | State    | Closed local      | Closed remote
@@ -157,6 +160,10 @@ method readOnce*(s: LPChannel,
   ## or the reads will lock each other.
   try:
     let bytes = await procCall BufferStream(s).readOnce(pbytes, nbytes)
+    when defined(lipp2p_network_protocols_metrics):
+      if s.tag.len > 0:
+        libp2p_protocols_bytes.inc(bytes.int64, labelValues=[s.tag, "in"])
+
     trace "readOnce", s, bytes
     if bytes == 0:
       await s.closeUnderlying()
@@ -194,6 +201,11 @@ method write*(s: LPChannel, msg: seq[byte]): Future[void] {.async.} =
     trace "write msg", s, conn = s.conn, len = msg.len
 
     await s.conn.writeMsg(s.id, s.msgCode, msg)
+
+    when defined(lipp2p_network_protocols_metrics):
+      if s.tag.len > 0:
+        libp2p_protocols_bytes.inc(msg.len.int64, labelValues=[s.tag, "out"])
+
     s.activity = true
   except CatchableError as exc:
     trace "exception in lpchannel write handler", s, msg = exc.msg
