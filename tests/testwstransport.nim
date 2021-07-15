@@ -71,6 +71,7 @@ uLu7KODi+eW62MHqs4N2
 suite "WebSocket transport":
   teardown:
     checkTrackers()
+
   commonTransportTest(
     "WebSocket",
     proc (): Transport = WsTransport.new(Upgrade()),
@@ -80,8 +81,8 @@ suite "WebSocket transport":
     "WebSocket Secure",
     proc (): Transport =
       WsTransport.new(
+        Upgrade(),
         TLSPrivateKey.init(SecureKey),
         TLSCertificate.init(SecureCert),
-        Upgrade(),
         {TLSFlags.NoVerifyHost, TLSFlags.NoVerifyServerName}),
-    "/ip4/0.0.0.0/tcp/0/wss")
+      "/ip4/0.0.0.0/tcp/0/wss")

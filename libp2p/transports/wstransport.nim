@@ -40,22 +40,24 @@ proc init*(T: type WsStream,
            timeout = 10.minutes,
            observedAddr: MultiAddress = MultiAddress()): T =
 
-  let stream = T(session: session,
-             timeout: timeout,
-             dir: dir,
-             observedAddr: observedAddr)
+  let stream = T(
+    session: session,
+    timeout: timeout,
+    dir: dir,
+    observedAddr: observedAddr)
+
   stream.initStream()
   return stream
 
 method readOnce*(
   s: WsStream,
   pbytes: pointer,
-  nbytes: int):
-  Future[int] =
+  nbytes: int): Future[int] =
   return s.session.recv(pbytes, nbytes)
 
-method write*(s: WsStream, msg: seq[byte]):
-  Future[void] {.async.} =
+method write*(
+  s: WsStream,
+  msg: seq[byte]): Future[void] {.async.} =
   try:
     await s.session.send(msg, Opcode.Binary)
   except WSClosedError:
@@ -74,7 +76,12 @@ type
     tlsPrivateKey: TLSPrivateKey
     tlsCertificate: TLSCertificate
     tlsFlags: set[TLSFlags]
+    flags: set[ServerFlags]
+    factories: seq[ExtFactory]
+    rng: Rng
 
+proc secure*(self: WsTransport): bool =
+  not (isNil(self.tlsPrivateKey) or isNil(self.tlsCertificate))
 
 method start*(
   self: WsTransport,
@@ -90,23 +97,29 @@ method start*(
   trace "Starting WS transport"
 
   self.httpserver =
-    if isNil(self.tlsPrivateKey):
+    if self.secure:
+      TlsHttpServer.create(
+        address = self.ma.initTAddress().tryGet(),
+        tlsPrivateKey = self.tlsPrivateKey,
+        tlsCertificate = self.tlsCertificate,
+        flags = self.flags)
+    else:
       HttpServer.create(self.ma.initTAddress().tryGet())
-    else:
-      TlsHttpServer.create(self.ma.initTAddress().tryGet(),
-        self.tlsPrivateKey,
-        self.tlsCertificate)
 
-  self.wsserver = WSServer.new()
+  self.wsserver = WSServer.new(
+    factories = self.factories,
+    rng = self.rng)
 
-  let codec = if isNil(self.tlsPrivateKey):
-      MultiAddress.init("/ws")
-    else:
+  let codec = if self.secure:
       MultiAddress.init("/wss")
-  # always get the resolved address in case we're bound to 0.0.0.0:0
-  self.ma = MultiAddress.init(self.httpserver.sock.getLocalAddress()).tryGet() & codec.tryGet()
-  self.running = true
+    else:
+      MultiAddress.init("/ws")
 
+  # always get the resolved address in case we're bound to 0.0.0.0:0
+  self.ma = MultiAddress.init(
+    self.httpserver.localAddress()).tryGet() & codec.tryGet()
+
+  self.running = true
   trace "Listening on", address = self.ma
 
 method stop*(self: WsTransport) {.async, gcsafe.} =
@@ -119,17 +132,16 @@ method stop*(self: WsTransport) {.async, gcsafe.} =
     trace "Stopping WS transport"
     await procCall Transport(self).stop() # call base
 
-    var toWait: seq[Future[void]]
+    checkFutures(
+      await allFinished(
+        self.connections[Direction.In].mapIt(it.close()) &
+        self.connections[Direction.Out].mapIt(it.close())))
+
     # server can be nil
     if not isNil(self.httpserver):
       self.httpserver.stop()
-      toWait.add(self.httpserver.closeWait())
+      await self.httpserver.closeWait()
 
-    for conn in self.connections[Direction.In] &
-                self.connections[Direction.Out]:
-      toWait.add(conn.close())
-
-    await allFutures(toWait)
     self.httpserver = nil
     trace "Transport stopped"
   except CatchableError as exc:
@@ -152,9 +164,10 @@ method accept*(self: WsTransport): Future[Connection] {.async, gcsafe.} =
 
   try:
     let
-      transp = await self.httpserver.accept()
-      wstransp = await self.wsserver.handleRequest(transp)
+      req = await self.httpserver.accept()
+      wstransp = await self.wsserver.handleRequest(req)
       stream = WsStream.init(wstransp, Direction.In)
+
     self.trackConnection(stream, Direction.In)
     return stream
   except TransportOsError as exc:
@@ -165,7 +178,7 @@ method accept*(self: WsTransport): Future[Connection] {.async, gcsafe.} =
     debug "Server was closed", exc = exc.msg
     raise newTransportClosedError(exc)
   except CatchableError as exc:
-    warn "Unexpected error creating connection", exc = exc.msg
+    warn "Unexpected error accepting connection", exc = exc.msg
     raise exc
 
 method dial*(
@@ -178,7 +191,11 @@ method dial*(
 
   let
     secure = WSS.match(address)
-    transp = await WebSocket.connect(address.initTAddress().tryGet(), "", secure=secure, flags=self.tlsFlags)
+    transp = await WebSocket.connect(
+      address.initTAddress().tryGet(),
+      "",
+      secure = secure,
+      flags = self.tlsFlags)
     stream = WsStream.init(transp, Direction.Out)
 
   self.trackConnection(stream, Direction.Out)
@@ -189,21 +206,36 @@ method handles*(t: WsTransport, address: MultiAddress): bool {.gcsafe.} =
     if address.protocols.isOk:
       return WebSockets.match(address)
 
-proc new*(T: typedesc[WsTransport], upgrade: Upgrade): T =
-
-  ## Standard WsTransport
-  T(
-    upgrader: upgrade)
-
-proc new*(T: typedesc[WsTransport],
+proc new*(
+  T: typedesc[WsTransport],
+  upgrade: Upgrade,
   tlsPrivateKey: TLSPrivateKey,
   tlsCertificate: TLSCertificate,
-  upgrade: Upgrade,
-  tlsFlags: set[TLSFlags] = {}): T =
+  tlsFlags: set[TLSFlags] = {},
+  flags: set[ServerFlags] = {},
+  factories: openArray[ExtFactory] = [],
+  rng: Rng = nil): T =
 
-  ## Secure WsTransport
   T(
     upgrader: upgrade,
     tlsPrivateKey: tlsPrivateKey,
     tlsCertificate: tlsCertificate,
-    tlsFlags: tlsFlags)
+    tlsFlags: tlsFlags,
+    flags: flags,
+    factories: @factories,
+    rng: rng)
+
+proc new*(
+  T: typedesc[WsTransport],
+  upgrade: Upgrade,
+  flags: set[ServerFlags] = {},
+  factories: openArray[ExtFactory] = [],
+  rng: Rng = nil): T =
+
+  T.new(
+    upgrade = upgrade,
+    tlsPrivateKey = nil,
+    tlsCertificate = nil,
+    flags = flags,
+    factories = @factories,
+    rng = rng)

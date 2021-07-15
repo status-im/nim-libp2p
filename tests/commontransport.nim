@@ -44,12 +44,14 @@ proc commonTransportTest*(name: string, prov: TransportProvider, ma: string) =
       await conn.readExactly(addr msg[0], 6)
 
       await conn.close() #for some protocols, closing requires actively reading, so we must close here
-      await handlerWait.wait(1.seconds) # when no issues will not wait that long!
 
-      await transport2.stop()
-      await transport1.stop()
+      await allFuturesThrowing(
+        allFinished(
+          transport1.stop(),
+          transport2.stop()))
 
       check string.fromBytes(msg) == "Hello!"
+      await handlerWait.wait(1.seconds) # when no issues will not wait that long!
 
     asyncTest "e2e: handle read":
       let ma: MultiAddress = Multiaddress.init(ma).tryGet()
@@ -72,8 +74,10 @@ proc commonTransportTest*(name: string, prov: TransportProvider, ma: string) =
       await conn.close() #for some protocols, closing requires actively reading, so we must close here
       await handlerWait.wait(1.seconds) # when no issues will not wait that long!
 
-      await transport2.stop()
-      await transport1.stop()
+      await allFuturesThrowing(
+        allFinished(
+          transport1.stop(),
+          transport2.stop()))
 
     asyncTest "e2e: handle dial cancellation":
       let ma: MultiAddress = Multiaddress.init(ma).tryGet()
@@ -87,8 +91,10 @@ proc commonTransportTest*(name: string, prov: TransportProvider, ma: string) =
       await cancellation.cancelAndWait()
       check cancellation.cancelled
 
-      await transport2.stop()
-      await transport1.stop()
+      await allFuturesThrowing(
+        allFinished(
+          transport1.stop(),
+          transport2.stop()))
 
     asyncTest "e2e: handle accept cancellation":
       let ma: MultiAddress = Multiaddress.init(ma).tryGet()
@@ -114,17 +120,10 @@ proc commonTransportTest*(name: string, prov: TransportProvider, ma: string) =
       let conn = await transport2.dial(transport1.ma)
       let serverConn = await acceptHandler
 
-      #For user-space protocols, we need to read to allow
-      #the other party to disconnect
-      let clientRead = conn.readLp(1024)
-      let serverRead = serverConn.readLp(1024)
+      await allFuturesThrowing(
+        allFinished(
+          transport1.stop(),
+          transport2.stop()))
 
-      await transport1.stop()
       check serverConn.closed()
-
-      await transport2.stop()
       check conn.closed()
-
-      #will throw EOF
-      try: discard await clientRead: except: discard
-      try: discard await serverRead: except: discard
